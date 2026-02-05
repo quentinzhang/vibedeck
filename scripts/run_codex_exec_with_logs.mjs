@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -40,6 +41,55 @@ function toBool(v) {
   return s === '1' || s === 'true' || s === 'yes' || s === 'y';
 }
 
+function parseDotenv(text) {
+  const env = {};
+  const lines = String(text || '').split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const withoutExport = line.startsWith('export ') ? line.slice('export '.length).trim() : line;
+    const eq = withoutExport.indexOf('=');
+    if (eq === -1) continue;
+
+    const key = withoutExport.slice(0, eq).trim();
+    let value = withoutExport.slice(eq + 1).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1).replaceAll(/\\([\\nrt"])/g, (_, ch) => {
+        if (ch === 'n') return '\n';
+        if (ch === 'r') return '\r';
+        if (ch === 't') return '\t';
+        return ch;
+      });
+    } else if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+      value = value.slice(1, -1);
+    }
+
+    env[key] = value;
+  }
+  return env;
+}
+
+async function loadOpenclawEnv({ envFile } = {}) {
+  const resolved = String(envFile || '').trim()
+    || path.join(os.homedir(), '.openclaw', '.env');
+
+  const raw = await fsp.readFile(resolved, 'utf8').catch(() => '');
+  if (!raw) return { loaded: false, path: resolved };
+
+  const parsed = parseDotenv(raw);
+  for (const [key, value] of Object.entries(parsed)) {
+    const current = process.env[key];
+    const hasValue = typeof value === 'string' && value.length > 0;
+    const missingOrBlank = current === undefined || current === null || String(current) === '';
+    if (missingOrBlank && hasValue) process.env[key] = value;
+  }
+
+  return { loaded: true, path: resolved };
+}
+
 async function main() {
   const { args } = parseArgs(process.argv.slice(2));
   const codexCmd = String(args.codex || 'codex').trim();
@@ -50,6 +100,7 @@ async function main() {
   const logPath = args.log ? String(args.log).trim() : `${outPath}.log`;
   const mode = String(args.mode || 'danger').trim();
   const model = args.model ? String(args.model).trim() : '';
+  const envFile = args['env-file'] ? String(args['env-file']).trim() : '';
 
   if (!workdir) throw new Error('Missing --workdir');
   if (!promptPath) throw new Error('Missing --prompt');
@@ -71,10 +122,13 @@ async function main() {
   if (toBool(args['skip-git-repo-check'])) codexArgs.push('--skip-git-repo-check');
   codexArgs.push('-C', workdir, '--output-schema', schemaPath, '--output-last-message', outPath, '-');
 
+  const openclawEnv = await loadOpenclawEnv({ envFile });
+
   await new Promise((resolve) => {
     const logStream = fs.createWriteStream(logPath, { flags: 'a' });
     logStream.write(`\n# codex exec started_at=${new Date().toISOString()}\n`);
     logStream.write(`# cmd: ${codexCmd} ${codexArgs.join(' ')}\n`);
+    logStream.write(`# env: ${openclawEnv.loaded ? 'loaded' : 'missing'} ${openclawEnv.path}\n`);
 
     const child = spawn(codexCmd, codexArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdout.on('data', (chunk) => {
@@ -102,4 +156,3 @@ main().catch((err) => {
   console.error(err?.stack || String(err));
   process.exit(1);
 });
-

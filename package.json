@@ -1,0 +1,36 @@
+{
+  "name": "unified-prd-hub",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "prd": "./bin/prd.mjs"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test",
+    "prd:init": "node scripts/prd_cards.mjs init --hub .",
+    "prd:project:new": "node scripts/prd_cards.mjs project:new --hub .",
+    "prd:new": "node scripts/prd_cards.mjs new --hub .",
+    "prd:move": "node scripts/prd_cards.mjs move --hub .",
+    "prd:sync": "node scripts/prd-sync.mjs",
+    "prd:autopilot:dispatch": "node scripts/prd-autopilot/prd_autopilot.mjs dispatch",
+    "prd:autopilot:reconcile": "node scripts/prd-autopilot/prd_autopilot.mjs reconcile",
+    "prd:autopilot:tick": "node scripts/prd-autopilot/prd_autopilot.mjs tick"
+  },
+  "dependencies": {
+    "lucide-react": "^0.555.0",
+    "react-dom": "^19.2.0",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/react": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

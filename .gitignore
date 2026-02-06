@@ -44,10 +44,12 @@ coverage/
 .eslintcache
 .stylelintcache
 
-# PRD projects: ignore everything except templates
-projects/*/*
-!projects/_templates/
-!projects/_templates/**
+# PRD projects: keep local-only (do not track in git)
+projects/
+
+# Shared templates live at repo root
+!_templates/
+!_templates/**
 
 # public directory: ignore everything except screenshots
 public/*

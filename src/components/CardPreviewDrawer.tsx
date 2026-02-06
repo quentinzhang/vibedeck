@@ -1,5 +1,38 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type { HubCard } from '../lib/statusModel';
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, { cache: 'no-store' });
+  const raw = await res.text();
+  let json: unknown = null;
+  try {
+    json = raw ? JSON.parse(raw) : null;
+  } catch {
+    // ignore
+  }
+  if (!res.ok) {
+    const msg =
+      json && typeof json === 'object' && 'error' in json ? String((json as any).error) : raw;
+    throw new Error(msg || `${res.status} ${res.statusText}`);
+  }
+  return json as T;
+}
+
+async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url, { cache: 'no-store' });
+  const raw = await res.text();
+  if (!res.ok) {
+    let msg = raw;
+    try {
+      const json = raw ? (JSON.parse(raw) as unknown) : null;
+      if (json && typeof json === 'object' && 'error' in json) msg = String((json as any).error);
+    } catch {
+      // ignore
+    }
+    throw new Error(msg || `${res.status} ${res.statusText}`);
+  }
+  return raw;
+}
 
 export default function CardPreviewDrawer({
   card,
@@ -16,6 +49,12 @@ export default function CardPreviewDrawer({
   onOpenInEditor: () => void;
   onClose: () => void;
 }) {
+  const [activeTab, setActiveTab] = useState<'card' | 'log'>('card');
+  const [logAvailable, setLogAvailable] = useState<boolean>(false);
+  const [logText, setLogText] = useState<string | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [logLoading, setLogLoading] = useState(false);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -23,6 +62,56 @@ export default function CardPreviewDrawer({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    setActiveTab('card');
+    setLogAvailable(false);
+    setLogText(null);
+    setLogError(null);
+    setLogLoading(false);
+
+    if (!card) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const meta = await fetchJson<{ ok: boolean; exists?: boolean }>(
+          `/__prd/api/result-log?project=${encodeURIComponent(card.project)}&cardId=${encodeURIComponent(card.id)}&format=json&t=${Date.now()}`,
+        );
+        if (!cancelled) setLogAvailable(Boolean(meta.exists));
+      } catch {
+        if (!cancelled) setLogAvailable(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [card?.project, card?.id]);
+
+  const loadLog = useCallback(async () => {
+    if (!card) return;
+    setLogLoading(true);
+    setLogError(null);
+    try {
+      const next = await fetchText(
+        `/__prd/api/result-log?project=${encodeURIComponent(card.project)}&cardId=${encodeURIComponent(card.id)}&format=text&t=${Date.now()}`,
+      );
+      setLogText(next);
+    } catch (err) {
+      setLogText(null);
+      setLogError(err instanceof Error ? err.message : 'Failed to load log');
+    } finally {
+      setLogLoading(false);
+    }
+  }, [card?.project, card?.id]);
+
+  useEffect(() => {
+    if (activeTab !== 'log') return;
+    if (!logAvailable) return;
+    if (logText != null || logLoading) return;
+    void loadLog();
+  }, [activeTab, loadLog, logAvailable, logLoading, logText]);
 
   if (!card) return null;
 
@@ -65,7 +154,56 @@ export default function CardPreviewDrawer({
         </div>
 
         <div className="h-[calc(100%-73px)] overflow-auto p-4">
-          {loading ? (
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('card')}
+              className={`rounded px-3 py-1.5 text-xs ${
+                activeTab === 'card'
+                  ? 'bg-white text-black'
+                  : 'border border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+              }`}
+            >
+              Card
+            </button>
+            {logAvailable ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab('log')}
+                className={`rounded px-3 py-1.5 text-xs ${
+                  activeTab === 'log'
+                    ? 'bg-white text-black'
+                    : 'border border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                }`}
+              >
+                Result log
+              </button>
+            ) : null}
+            {activeTab === 'log' && logAvailable ? (
+              <button
+                type="button"
+                onClick={() => void loadLog()}
+                className="ml-auto rounded border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+                disabled={logLoading}
+              >
+                {logLoading ? 'Loading…' : 'Reload'}
+              </button>
+            ) : null}
+          </div>
+
+          {activeTab === 'log' ? (
+            logLoading && !logText ? (
+              <div className="text-sm text-zinc-400">Loading log…</div>
+            ) : logError ? (
+              <div className="rounded-lg border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">
+                {logError}
+              </div>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-xs leading-relaxed text-zinc-200">
+                {logText || ''}
+              </pre>
+            )
+          ) : loading ? (
             <div className="text-sm text-zinc-400">Loading…</div>
           ) : error ? (
             <div className="rounded-lg border border-red-900/40 bg-red-950/30 p-4 text-sm text-red-200">

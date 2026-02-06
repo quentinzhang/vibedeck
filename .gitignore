@@ -48,5 +48,3 @@ coverage/
 projects/*/*
 !projects/_templates/
 !projects/_templates/**
-!projects/*/templates/
-!projects/*/templates/**

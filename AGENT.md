@@ -66,3 +66,4 @@ If you are not running autopilot, follow this routine:
 - UnionLLM: /var/www/UnionLLM
 - ConsoleX_backend: /var/www/evals_api
 - prd: /var/www/prd
+- toolsets: /var/www/MCPList/backend

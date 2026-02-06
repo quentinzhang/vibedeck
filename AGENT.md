@@ -38,7 +38,7 @@ Recommended main flow: `drafts` → `pending` → `in-progress` → `in-review` 
 
 ## Minimum executable frontmatter
 
-Template: `projects/_templates/requirement-card.md` (projects may override under `projects/<project>/templates/`).
+Template: `_templates/requirement-card.md` (projects may override under `projects/<project>/templates/`).
 
 Minimum required fields:
 

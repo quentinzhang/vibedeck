@@ -477,6 +477,8 @@ function deriveIdFromFilename(filePath) {
 async function pickTemplate({ hubRoot, projectName }) {
   const candidatePaths = [
     path.join(hubRoot, 'projects', projectName, 'templates', 'requirement-card.md'),
+    path.join(hubRoot, '_templates', 'requirement-card.md'),
+    // Back-compat: legacy shared template location.
     path.join(hubRoot, 'projects', '_templates', 'requirement-card.md'),
   ];
   for (const p of candidatePaths) {
@@ -486,8 +488,14 @@ async function pickTemplate({ hubRoot, projectName }) {
   // Fallback to repo template.
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(scriptDir, '..');
-  const repoTemplate = path.join(repoRoot, 'projects', '_templates', 'requirement-card.md');
-  if (await fileExists(repoTemplate)) return await fs.readFile(repoTemplate, 'utf8');
+  const repoCandidateTemplates = [
+    path.join(repoRoot, '_templates', 'requirement-card.md'),
+    // Back-compat: legacy repo template location.
+    path.join(repoRoot, 'projects', '_templates', 'requirement-card.md'),
+  ];
+  for (const p of repoCandidateTemplates) {
+    if (await fileExists(p)) return await fs.readFile(p, 'utf8');
+  }
 
   throw new Error('requirement-card template not found');
 }
@@ -502,6 +510,7 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
   await ensureDir(hub);
   await ensureDir(path.join(hub, 'projects'));
   await ensureDir(path.join(hub, 'public'));
+  await ensureDir(path.join(hub, '_templates'));
 
   await copyOrWrite({
     srcPaths: [path.join(assetsRoot, 'AGENT.md'), path.join(legacyAssetsRoot, 'AGENT.md'), path.join(repoRoot, 'AGENT.md')],
@@ -532,14 +541,18 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
     force,
   });
 
-  await ensureDir(path.join(hub, 'projects', '_templates'));
   await copyOrWrite({
     srcPaths: [
+      // Preferred new locations.
+      path.join(assetsRoot, '_templates', 'requirement-card.md'),
+      path.join(legacyAssetsRoot, '_templates', 'requirement-card.md'),
+      path.join(repoRoot, '_templates', 'requirement-card.md'),
+      // Back-compat: legacy locations.
       path.join(assetsRoot, 'projects', '_templates', 'requirement-card.md'),
       path.join(legacyAssetsRoot, 'projects', '_templates', 'requirement-card.md'),
       path.join(repoRoot, 'projects', '_templates', 'requirement-card.md'),
     ],
-    destPath: path.join(hub, 'projects', '_templates', 'requirement-card.md'),
+    destPath: path.join(hub, '_templates', 'requirement-card.md'),
     fallbackContent:
       '---\n' +
       'id: BUG-0001\n' +
@@ -578,7 +591,7 @@ async function ensureProjectTemplate({ hubRoot, projectName } = {}) {
   const projectTemplate = path.join(hub, 'projects', name, 'templates', 'requirement-card.md');
   if (await fileExists(projectTemplate)) return;
 
-  const sharedTemplate = path.join(hub, 'projects', '_templates', 'requirement-card.md');
+  const sharedTemplate = path.join(hub, '_templates', 'requirement-card.md');
   if (await fileExists(sharedTemplate)) {
     await copyFileIfMissing(sharedTemplate, projectTemplate, { force: false });
     return;

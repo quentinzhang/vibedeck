@@ -41,8 +41,8 @@ Security note: the built-in API is local-only by default. Set `PRD_DASHBOARD_ALL
 
 ## Repository layout
 
-- `projects/<project>/<status>/*.md`: requirement cards
-- `projects/_templates/requirement-card.md`: default card template (projects may override under `projects/<project>/templates/`)
+- `projects/<project>/<status>/*.md`: requirement cards (local-only; ignored by git)
+- `_templates/requirement-card.md`: default card template (projects may override under `projects/<project>/templates/`, also local-only)
 - `AGENT.md`: Project → Repo mapping (used by scripts and autopilot)
 - `STATUS.md` and `public/status.json`: generated board index (via `prd:sync`)
 

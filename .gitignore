@@ -48,3 +48,6 @@ coverage/
 projects/*/*
 !projects/_templates/
 !projects/_templates/**
+
+# public directory: ignore everything except screenshots
+public/*

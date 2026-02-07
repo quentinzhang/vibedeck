@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { parseAgentProjects } from './scripts/lib/agentMapping.mjs';
 
 export default defineConfig(() => {
   const allowRemote =
@@ -11,6 +12,8 @@ export default defineConfig(() => {
 
   const internalPrdApi = () => {
     const repoRoot = path.resolve(__dirname, '.');
+    const agentPath = path.join(repoRoot, 'AGENT.md');
+    let agentCache: { mtimeMs: number; mapping: Map<string, string> } | null = null;
 
     function isLocalRequest(req: any) {
       if (allowRemote) return true;
@@ -32,6 +35,19 @@ export default defineConfig(() => {
         throw new Error('Invalid path (outside repo)');
       }
       return { rel, abs };
+    }
+
+    function sanitizeKey(raw: string) {
+      return String(raw || '').replaceAll(/[^A-Za-z0-9_.-]+/g, '_');
+    }
+
+    async function getAgentMapping() {
+      const stat = await fs.stat(agentPath);
+      if (agentCache && agentCache.mtimeMs === stat.mtimeMs) return agentCache.mapping;
+      const text = await fs.readFile(agentPath, 'utf8');
+      const mapping = parseAgentProjects(text);
+      agentCache = { mtimeMs: stat.mtimeMs, mapping };
+      return mapping;
     }
 
     async function readJsonBody(req: any) {
@@ -193,6 +209,57 @@ export default defineConfig(() => {
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end(text);
         } catch (error) {
+          res.statusCode = 400;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.end(error instanceof Error ? error.message : 'Bad request');
+        }
+      });
+
+      server.middlewares.use('/__prd/api/log', async (req: any, res: any) => {
+        if (!isLocalRequest(req)) {
+          res.statusCode = 403;
+          res.end('Forbidden');
+          return;
+        }
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end('Method not allowed');
+          return;
+        }
+
+        try {
+          const url = new URL(String(req.url || ''), 'http://localhost');
+          const project = String(url.searchParams.get('project') || '').trim();
+          const cardId = String(url.searchParams.get('cardId') || '').trim();
+          if (!project) throw new Error('Missing project');
+          if (!cardId) throw new Error('Missing cardId');
+
+          const mapping = await getAgentMapping();
+          const repoPath = mapping.get(project);
+          if (!repoPath) throw new Error(`Unknown project: ${project}`);
+
+          const runKey = sanitizeKey(`${project}-${cardId}`);
+          const worktreePath = path.join(repoPath, '.worktrees', cardId);
+          const logAbs = path.resolve(
+            worktreePath,
+            '.prd-autopilot',
+            'results',
+            `${runKey}.log`,
+          );
+          const baseWithSep = worktreePath.endsWith(path.sep) ? worktreePath : `${worktreePath}${path.sep}`;
+          if (!logAbs.startsWith(baseWithSep)) throw new Error('Invalid log path');
+
+          const text = await fs.readFile(logAbs, 'utf8');
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.end(text);
+        } catch (error: any) {
+          if (error?.code === 'ENOENT') {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.end('Log not found');
+            return;
+          }
           res.statusCode = 400;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end(error instanceof Error ? error.message : 'Bad request');

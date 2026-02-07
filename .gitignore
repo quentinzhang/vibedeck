@@ -46,6 +46,7 @@ coverage/
 
 # PRD projects: keep local-only (do not track in git)
 projects/
+projects
 
 # Shared templates live at repo root
 !_templates/

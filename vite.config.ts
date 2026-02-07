@@ -12,6 +12,8 @@ export default defineConfig(() => {
 
   const internalPrdApi = () => {
     const repoRoot = path.resolve(__dirname, '.');
+    const agentPath = path.join(repoRoot, 'AGENT.md');
+    let agentCache: { mtimeMs: number; mapping: Map<string, string> } | null = null;
 
     function isLocalRequest(req: any) {
       if (allowRemote) return true;
@@ -43,17 +45,13 @@ export default defineConfig(() => {
       return String(raw || '').replaceAll(/[^A-Za-z0-9_.-]+/g, '_');
     }
 
-    function computeRunKey(project: string, cardId: string) {
-      return sanitizeKey(`${project}-${cardId}`);
-    }
-
-    async function fileExists(filePath: string) {
-      try {
-        const stat = await fs.stat(filePath);
-        return stat.isFile();
-      } catch {
-        return false;
-      }
+    async function getAgentMapping() {
+      const stat = await fs.stat(agentPath);
+      if (agentCache && agentCache.mtimeMs === stat.mtimeMs) return agentCache.mapping;
+      const text = await fs.readFile(agentPath, 'utf8');
+      const mapping = parseAgentProjects(text);
+      agentCache = { mtimeMs: stat.mtimeMs, mapping };
+      return mapping;
     }
 
     async function readLogText(filePath: string, { maxBytes }: { maxBytes: number }) {
@@ -247,55 +245,55 @@ export default defineConfig(() => {
         }
       });
 
-      server.middlewares.use('/__prd/api/result-log', async (req: any, res: any) => {
+      server.middlewares.use('/__prd/api/log', async (req: any, res: any) => {
         if (!isLocalRequest(req)) {
-          sendJson(res, 403, { ok: false, error: 'Forbidden' });
+          res.statusCode = 403;
+          res.end('Forbidden');
           return;
         }
         if (req.method !== 'GET') {
-          sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+          res.statusCode = 405;
+          res.end('Method not allowed');
           return;
         }
 
         try {
           const url = new URL(String(req.url || ''), 'http://localhost');
-          const project = String(url.searchParams.get('project') || '');
-          const cardId = String(url.searchParams.get('cardId') || '');
-          const format = String(url.searchParams.get('format') || 'json').toLowerCase();
-
-          if (!project || !cardId) throw new Error('Missing project/cardId');
+          const project = String(url.searchParams.get('project') || '').trim();
+          const cardId = String(url.searchParams.get('cardId') || '').trim();
+          if (!project) throw new Error('Missing project');
+          if (!cardId) throw new Error('Missing cardId');
           if (!isSafeKey(project) || !isSafeKey(cardId)) throw new Error('Invalid project/cardId');
 
-          const agentPath = path.join(repoRoot, 'AGENT.md');
-          const agentText = await fs.readFile(agentPath, 'utf8').catch(() => '');
-          const mapping = parseAgentProjects(agentText);
+          const mapping = await getAgentMapping();
           const repoPath = mapping.get(project);
           if (!repoPath) throw new Error(`Unknown project: ${project}`);
 
-          const runKey = computeRunKey(project, cardId);
+          const runKey = sanitizeKey(`${project}-${cardId}`);
           const worktreePath = path.join(repoPath, '.worktrees', cardId);
-          const logPath = path.join(worktreePath, '.prd-autopilot', 'results', `${runKey}.log`);
-          const exists = await fileExists(logPath);
+          const logAbs = path.resolve(
+            worktreePath,
+            '.prd-autopilot',
+            'results',
+            `${runKey}.log`,
+          );
+          const baseWithSep = worktreePath.endsWith(path.sep) ? worktreePath : `${worktreePath}${path.sep}`;
+          if (!logAbs.startsWith(baseWithSep)) throw new Error('Invalid log path');
 
-          if (format === 'json') {
-            sendJson(res, 200, { ok: true, exists });
-            return;
-          }
-
-          if (format !== 'text') throw new Error(`Invalid format: ${format} (expected: json|text)`);
-          if (!exists) {
-            res.statusCode = 404;
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.end('Not found');
-            return;
-          }
-
-          const { text } = await readLogText(logPath, { maxBytes: 1024 * 1024 });
+          const { text } = await readLogText(logAbs, { maxBytes: 1024 * 1024 });
           res.statusCode = 200;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end(text);
-        } catch (error) {
-          sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : 'Bad request' });
+        } catch (error: any) {
+          if (error?.code === 'ENOENT') {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.end('Log not found');
+            return;
+          }
+          res.statusCode = 400;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.end(error instanceof Error ? error.message : 'Bad request');
         }
       });
     }

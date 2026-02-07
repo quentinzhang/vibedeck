@@ -1,0 +1,25 @@
+{
+  "pid": 16845,
+  "runner": "process",
+  "startedAt": "2026-02-05T16:15:38.112Z",
+  "command": {
+    "runScript": "/var/www/prd/scripts/run_codex_exec_with_logs.mjs",
+    "runnerArgs": [
+      "--mode",
+      "danger",
+      "--codex",
+      "codex",
+      "--workdir",
+      "/var/www/prd/.worktrees/FEAT-0002",
+      "--prompt",
+      "/var/www/prd/.worktrees/FEAT-0002/.prd-autopilot/prompts/prd-FEAT-0002.md",
+      "--schema",
+      "/var/www/prd/skills/prd-worker/assets/result.schema.json",
+      "--output",
+      "/var/www/prd/.worktrees/FEAT-0002/.prd-autopilot/results/prd-FEAT-0002.json",
+      "--log",
+      "/var/www/prd/.worktrees/FEAT-0002/.prd-autopilot/results/prd-FEAT-0002.log",
+      "--skip-git-repo-check"
+    ]
+  }
+}

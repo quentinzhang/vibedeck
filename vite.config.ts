@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { parseAgentProjects } from './scripts/lib/agentMapping.mjs';
 
 export default defineConfig(() => {
   const allowRemote =
@@ -32,6 +33,47 @@ export default defineConfig(() => {
         throw new Error('Invalid path (outside repo)');
       }
       return { rel, abs };
+    }
+
+    function isSafeKey(value: string) {
+      return /^[A-Za-z0-9_.-]+$/.test(String(value || ''));
+    }
+
+    function sanitizeKey(raw: string) {
+      return String(raw || '').replaceAll(/[^A-Za-z0-9_.-]+/g, '_');
+    }
+
+    function computeRunKey(project: string, cardId: string) {
+      return sanitizeKey(`${project}-${cardId}`);
+    }
+
+    async function fileExists(filePath: string) {
+      try {
+        const stat = await fs.stat(filePath);
+        return stat.isFile();
+      } catch {
+        return false;
+      }
+    }
+
+    async function readLogText(filePath: string, { maxBytes }: { maxBytes: number }) {
+      const stat = await fs.stat(filePath);
+      const size = stat.size;
+
+      if (size <= maxBytes) {
+        return { text: await fs.readFile(filePath, 'utf8'), truncated: false };
+      }
+
+      const handle = await fs.open(filePath, 'r');
+      try {
+        const start = Math.max(0, size - maxBytes);
+        const buf = Buffer.alloc(size - start);
+        await handle.read(buf, 0, buf.length, start);
+        const header = `...(truncated, showing last ${maxBytes} bytes of ${size})...\n\n`;
+        return { text: `${header}${buf.toString('utf8')}`, truncated: true };
+      } finally {
+        await handle.close();
+      }
     }
 
     async function readJsonBody(req: any) {
@@ -202,6 +244,58 @@ export default defineConfig(() => {
           res.statusCode = 400;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end(error instanceof Error ? error.message : 'Bad request');
+        }
+      });
+
+      server.middlewares.use('/__prd/api/result-log', async (req: any, res: any) => {
+        if (!isLocalRequest(req)) {
+          sendJson(res, 403, { ok: false, error: 'Forbidden' });
+          return;
+        }
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+          return;
+        }
+
+        try {
+          const url = new URL(String(req.url || ''), 'http://localhost');
+          const project = String(url.searchParams.get('project') || '');
+          const cardId = String(url.searchParams.get('cardId') || '');
+          const format = String(url.searchParams.get('format') || 'json').toLowerCase();
+
+          if (!project || !cardId) throw new Error('Missing project/cardId');
+          if (!isSafeKey(project) || !isSafeKey(cardId)) throw new Error('Invalid project/cardId');
+
+          const agentPath = path.join(repoRoot, 'AGENT.md');
+          const agentText = await fs.readFile(agentPath, 'utf8').catch(() => '');
+          const mapping = parseAgentProjects(agentText);
+          const repoPath = mapping.get(project);
+          if (!repoPath) throw new Error(`Unknown project: ${project}`);
+
+          const runKey = computeRunKey(project, cardId);
+          const worktreePath = path.join(repoPath, '.worktrees', cardId);
+          const logPath = path.join(worktreePath, '.prd-autopilot', 'results', `${runKey}.log`);
+          const exists = await fileExists(logPath);
+
+          if (format === 'json') {
+            sendJson(res, 200, { ok: true, exists });
+            return;
+          }
+
+          if (format !== 'text') throw new Error(`Invalid format: ${format} (expected: json|text)`);
+          if (!exists) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.end('Not found');
+            return;
+          }
+
+          const { text } = await readLogText(logPath, { maxBytes: 1024 * 1024 });
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.end(text);
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : 'Bad request' });
         }
       });
     }

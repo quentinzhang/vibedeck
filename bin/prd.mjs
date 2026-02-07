@@ -14,8 +14,8 @@ Usage:
   prd project new [--hub <path>] [--project <name>] [--repo-path <abs>] [--non-interactive] [--no-sync]   (alias of project add)
   prd add [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--status pending|...] [--non-interactive] [--no-sync] [...]
   prd new [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--status pending|...] [--non-interactive] [--no-sync] [...]   (alias of add)
-  prd move [--hub <path>] --relPath projects/<project>/<status>/<file>.md --to <status> [--no-sync]
-  prd archive [--hub <path>] --relPath projects/<project>/<status>/<file>.md [--no-sync]
+  prd move [--hub <path>] --relPath projects/<project>/<file>.md --to <status> [--no-sync]
+  prd archive [--hub <path>] --relPath projects/<project>/<file>.md [--no-sync]
   prd list pending [--hub <path>] [--project <name>] [--json] [--sync]
   prd autopilot <dispatch|reconcile|tick> [--hub <path>] [--project <name>] [--max-parallel <n>] [--runner tmux|process|command] [--runner-command <template>] [--tmux-prefix <p>] [...]
   prd sync [--hub <path>]

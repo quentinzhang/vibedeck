@@ -9,6 +9,7 @@ import { extractFrontmatter, parseFrontmatterFields } from '../lib/frontmatter.m
 import { buildHubStatus } from '../lib/sync.mjs';
 
 import { checkDefinitionOfReady, normalizeDorMode } from './dor.mjs';
+import { computeWorktreeNames, parseGitWorktreeListPorcelain, sanitizeKey } from './worktree.mjs';
 
 const STATUS_DIRS = /** @type {const} */ ([
   'drafts',
@@ -86,10 +87,6 @@ function tryRun(cmd, argv, options = {}) {
     const stderr = err?.stderr ? String(err.stderr) : '';
     return { ok: false, out: '', stderr };
   }
-}
-
-function sanitizeKey(raw) {
-  return String(raw || '').replaceAll(/[^A-Za-z0-9_.-]+/g, '_');
 }
 
 function computeRunKey(project, cardId) {
@@ -183,36 +180,34 @@ function upsertFrontmatterFields(markdown, patch) {
 }
 
 function parseCardRelPath(relPath) {
-  const rel = String(relPath || '').split(path.sep).join('/');
+  const rel = String(relPath || '').split(path.sep).join('/').replace(/^\/+/, '');
   const parts = rel.split('/').filter(Boolean);
-  if (parts.length < 4) return null;
+  if (parts.length < 3) return null;
   if (parts[0] !== 'projects') return null;
   const project = parts[1];
-  const status = normalizeStatus(parts[2]);
-  const subRel = parts.slice(3).join('/');
-  if (!project || !status || !STATUS_DIRS.includes(status) || !subRel) return null;
-  return { project, status, subRel };
+  const subRel = parts.slice(2).join('/');
+  if (!project || !subRel || !subRel.endsWith('.md')) return null;
+  return { project, subRel };
 }
 
 function buildCardAbsPath(hubRoot, { project, status, subRel }) {
-  return path.join(hubRoot, 'projects', project, status, ...String(subRel).split('/'));
+  return path.join(hubRoot, 'projects', project, ...String(subRel).split('/'));
 }
 
 async function moveCard({ hubRoot, relPath, toStatus, dryRun }) {
   const parsed = parseCardRelPath(relPath);
   if (!parsed) throw new Error(`Invalid relPath: ${relPath}`);
 
-  const fromStatus = parsed.status;
   const destStatus = normalizeStatus(toStatus);
   if (!STATUS_DIRS.includes(destStatus)) throw new Error(`Invalid toStatus: ${toStatus}`);
 
   const srcAbs = buildCardAbsPath(hubRoot, parsed);
-  const destAbs = buildCardAbsPath(hubRoot, { ...parsed, status: destStatus });
+  // Folder layout is no longer status-backed (except archived). Status is tracked in frontmatter.
+  // Keep the file in-place for normal moves to avoid churn; reconcile/dispatch only updates frontmatter.
+  const destAbs = srcAbs;
 
-  if (dryRun) return { srcAbs, destAbs, fromStatus, toStatus: destStatus };
-  await ensureDir(path.dirname(destAbs));
-  await fs.rename(srcAbs, destAbs);
-  return { srcAbs, destAbs, fromStatus, toStatus: destStatus };
+  if (dryRun) return { srcAbs, destAbs, fromStatus: '', toStatus: destStatus };
+  return { srcAbs, destAbs, fromStatus: '', toStatus: destStatus };
 }
 
 async function updateCardStatusFrontmatter(cardAbsPath, { status, updatedAt, dryRun }) {
@@ -288,24 +283,36 @@ function detectBaseBranch(repoPath) {
 
 function worktreeExists(repoPath, worktreePath) {
   const res = tryRun('git', ['-C', repoPath, 'worktree', 'list', '--porcelain']);
-  return res.ok && res.out.includes(String(worktreePath));
+  if (!res.ok) return false;
+  const target = path.resolve(String(worktreePath));
+  const entries = parseGitWorktreeListPorcelain(res.out);
+  return entries.some((e) => path.resolve(e.path) === target);
+}
+
+function getWorktreeBranch(repoPath, worktreePath) {
+  const res = tryRun('git', ['-C', repoPath, 'worktree', 'list', '--porcelain']);
+  if (!res.ok) return '';
+  const target = path.resolve(String(worktreePath));
+  const entries = parseGitWorktreeListPorcelain(res.out);
+  const found = entries.find((e) => path.resolve(e.path) === target);
+  return found?.branch || '';
 }
 
 function branchExists(repoPath, branchName) {
   return tryRun('git', ['-C', repoPath, 'show-ref', '--verify', '--quiet', `refs/heads/${branchName}`]).ok;
 }
 
-function ensureWorktree({ repoPath, cardId, worktreeBaseDir, baseBranch, dryRun }) {
-  const branchName = `prd/${cardId}`;
+function ensureWorktree({ repoPath, project, cardId, worktreeBaseDir, baseBranch, dryRun }) {
+  const { projectKey, cardKey, branchName } = computeWorktreeNames({ project, cardId });
   const worktreeBase = worktreeBaseDir
     ? path.resolve(repoPath, String(worktreeBaseDir))
     : path.join(repoPath, '.worktrees');
-  const worktreePath = path.join(worktreeBase, cardId);
+  const worktreePath = path.join(worktreeBase, projectKey, cardKey);
 
   if (worktreeExists(repoPath, worktreePath)) return { worktreePath, branchName, existed: true };
   if (dryRun) return { worktreePath, branchName, existed: false };
 
-  run('mkdir', ['-p', worktreeBase]);
+  run('mkdir', ['-p', path.dirname(worktreePath)]);
   if (branchExists(repoPath, branchName)) {
     run('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branchName]);
   } else {
@@ -428,9 +435,34 @@ function sortPending(cards) {
   });
 }
 
-function resolveWorktreePath({ repoPath, cardId, worktreeDir }) {
+async function resolveWorktreePath({ repoPath, project, cardId, runKey, worktreeDir }) {
   const base = worktreeDir ? path.resolve(repoPath, String(worktreeDir)) : path.join(repoPath, '.worktrees');
-  return path.join(base, cardId);
+  const { projectKey, cardKey, branchName, legacyBranchName } = computeWorktreeNames({ project, cardId });
+  const preferred = path.join(base, projectKey, cardKey);
+  const legacy = path.join(base, String(cardId || '').trim());
+
+  const candidates = [preferred, legacy];
+
+  if (runKey) {
+    for (const wt of candidates) {
+      const artifactRoot = path.join(wt, '.prd-autopilot');
+      const resultPath = path.join(artifactRoot, 'results', `${runKey}.json`);
+      const exitPath = `${resultPath}.exitcode`;
+      const promptPath = path.join(artifactRoot, 'prompts', `${runKey}.md`);
+      const pidPath = path.join(artifactRoot, 'results', `${runKey}.pid.json`);
+      if ((await fileExists(resultPath)) || (await fileExists(exitPath)) || (await fileExists(promptPath)) || (await fileExists(pidPath))) {
+        return wt;
+      }
+    }
+  }
+
+  if (worktreeExists(repoPath, preferred)) return preferred;
+  if (worktreeExists(repoPath, legacy)) {
+    const b = getWorktreeBranch(repoPath, legacy);
+    if (!b || b === legacyBranchName || b === branchName) return legacy;
+  }
+
+  return preferred;
 }
 
 async function countActiveWorkers({ hubRoot, mapping, tmuxPrefix, projectFilter, worktreeDir }) {
@@ -446,7 +478,7 @@ async function countActiveWorkers({ hubRoot, mapping, tmuxPrefix, projectFilter,
 
     const runKey = computeRunKey(project, cardId);
     const sessionName = computeSessionName(tmuxPrefix, project, cardId);
-    const worktreePath = resolveWorktreePath({ repoPath, cardId, worktreeDir });
+    const worktreePath = await resolveWorktreePath({ repoPath, project, cardId, runKey, worktreeDir });
     const artifactRoot = path.join(worktreePath, '.prd-autopilot');
     const resultPath = path.join(artifactRoot, 'results', `${runKey}.json`);
     const exitPath = `${resultPath}.exitcode`;
@@ -551,6 +583,7 @@ async function dispatchOnce({
 
     const { worktreePath } = ensureWorktree({
       repoPath,
+      project,
       cardId,
       worktreeBaseDir: worktreeDir,
       baseBranch,
@@ -807,7 +840,7 @@ async function reconcileOnce({
 
     const runKey = computeRunKey(project, cardId);
     const sessionName = computeSessionName(tmuxPrefix, project, cardId);
-    const worktreePath = resolveWorktreePath({ repoPath, cardId, worktreeDir });
+    const worktreePath = await resolveWorktreePath({ repoPath, project, cardId, runKey, worktreeDir });
     const artifactRoot = path.join(worktreePath, '.prd-autopilot');
     const resultPath = path.join(artifactRoot, 'results', `${runKey}.json`);
     const exitPath = `${resultPath}.exitcode`;

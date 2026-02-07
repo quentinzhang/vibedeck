@@ -33,7 +33,7 @@ Open:
 
 ## Dashboard
 
-- Drag cards between columns: moves the underlying `projects/<project>/<status>/...` file, updates frontmatter (`updated_at`, and `status` if present), then triggers a `prd:sync`.
+- Drag cards between columns: updates the card frontmatter (`status`, `updated_at`), then triggers a `prd:sync`. (Only the `archived` status is folder-backed under `projects/<project>/archived/`.)
 - Click a card: shows the raw Markdown content in a sidebar.
 - In the card sidebar, click `Edit` to open the Markdown file in a local editor (tries `PRD_DASHBOARD_EDITOR`, then `code`/`cursor`, then OS default opener).
 
@@ -41,24 +41,25 @@ Security note: the built-in API is local-only by default. Set `PRD_DASHBOARD_ALL
 
 ## Repository layout
 
-- `projects/<project>/<status>/*.md`: requirement cards (local-only; ignored by git)
+- `projects/<project>/*.md`: requirement cards (non-archived; local-only; ignored by git)
+- `projects/<project>/archived/*.md`: archived cards (excluded from daily rotation)
 - `_templates/requirement-card.md`: default card template (projects may override under `projects/<project>/templates/`, also local-only)
 - `AGENT.md`: Project → Repo mapping (used by scripts and autopilot)
 - `STATUS.md` and `public/status.json`: generated board index (via `prd:sync`)
 
 ## Status machine
 
-All projects share the same folder-backed statuses (status name = directory name; folder location is the source of truth):
+All projects share the same statuses. The source of truth is the card frontmatter field `status` (folder name is only a legacy fallback for older hubs).
 
-- `drafts` → `projects/<project>/drafts/` (excluded from daily rotation)
-- `pending` → `projects/<project>/pending/`
-- `in-progress` → `projects/<project>/in-progress/`
-- `blocked` → `projects/<project>/blocked/` (missing spec/AC, external dependency, infra missing)
-- `in-review` → `projects/<project>/in-review/`
-- `done` → `projects/<project>/done/`
-- `archived` → `projects/<project>/archived/` (excluded from daily rotation)
+- `drafts`
+- `pending`
+- `in-progress`
+- `blocked` (missing spec/AC, external dependency, infra missing)
+- `in-review`
+- `done`
+- `archived` (recommended to keep under `projects/<project>/archived/`)
 
-Rule: move the file to change status; frontmatter `status` is optional and may be stale.
+Rule: update frontmatter `status` to change status; the dashboard/CLI keeps `updated_at` fresh. If a card lives under a legacy status folder, the hub will still load it, but `status` will be taken from frontmatter first.
 
 Recommended main flow: `drafts` → `pending` → `in-progress` → `in-review` → `done` → `archived`.
 
@@ -104,7 +105,7 @@ node ./bin/prd.mjs autopilot tick --hub . --project <name> --max-parallel 2
 ```
 
 Notes:
-- Autopilot uses per-card Git worktrees under each target repo (default: `.worktrees/<CARD_ID>`).
+- Autopilot uses per-card Git worktrees under each target repo (default: `.worktrees/<project>/<CARD_ID>`).
 - Worker launch is configurable via `--runner tmux|process|command` (default: `tmux`).
 - Worker artifacts are written under `<worktree>/.prd-autopilot/` (prompt, result JSON, exitcode, logs).
 - The Definition of Ready gate is configurable via `--dor strict|loose|off` (default: `loose`). In `strict` mode, cards missing meaningful Acceptance Criteria / Test Plan are moved to `blocked` with an Autopilot note.

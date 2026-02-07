@@ -161,7 +161,13 @@ export default defineConfig(() => {
           const parts = rel.split('/');
           const projectName = parts[1] || '';
           const baseName = path.posix.basename(rel);
-          const nextRelPath = `projects/${projectName}/${toStatus}/${baseName}`;
+          const isArchivedPath = parts.length >= 4 && parts[2] === 'archived';
+          const nextRelPath =
+            toStatus === 'archived'
+              ? `projects/${projectName}/archived/${baseName}`
+              : isArchivedPath
+                ? `projects/${projectName}/${baseName}`
+                : rel;
 
           sendJson(res, 200, { ok: true, relPath: nextRelPath });
         } catch (error) {

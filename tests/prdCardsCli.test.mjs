@@ -80,7 +80,7 @@ test('prd_cards.mjs project:new creates project and mapping (non-interactive)', 
   assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
   const agent = await fs.readFile(path.join(tmp, 'AGENT.md'), 'utf8');
   assert.match(agent, /p2:\s*\/var\/www\/p2/);
-  const pendingDir = path.join(tmp, 'projects', 'p2', 'pending');
-  const stat = await fs.stat(pendingDir);
+  const archivedDir = path.join(tmp, 'projects', 'p2', 'archived');
+  const stat = await fs.stat(archivedDir);
   assert.equal(stat.isDirectory(), true);
 });

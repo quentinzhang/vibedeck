@@ -46,7 +46,7 @@ export default function ProjectSummaryGrid({
               {STATUS_LABEL[k]}
             </div>
           ))}
-          <div className="text-center">Warnings</div>
+          <div className="text-center">Drafts</div>
         </div>
         <div className="divide-y divide-zinc-800">
           {projects.map((p) => (
@@ -70,7 +70,7 @@ export default function ProjectSummaryGrid({
                   {p.counts?.[k] ?? 0}
                 </div>
               ))}
-              <div className="text-center font-mono text-xs text-zinc-200">{p.warnings?.length ?? 0}</div>
+              <div className="text-center font-mono text-xs text-zinc-200">{p.counts?.drafts ?? 0}</div>
             </button>
           ))}
         </div>

@@ -45,11 +45,11 @@ test('buildHubStatus aggregates cards and counts per project', async () => {
   assert.equal(p1.warnings.length, 0);
 
   assert.equal(p2.repo_path, '/var/www/p2');
-  assert.equal(p2.counts.pending, 1);
+  assert.equal(p2.counts['in-progress'], 1);
   assert.equal(p2.counts.total, 1);
-  assert.equal(p2.warnings.length, 0);
+  assert.equal(p2.warnings.length, 1);
 
   const c2 = status.cards.find((c) => c.project === 'p2');
   assert.ok(c2);
-  assert.equal(c2.status, 'pending');
+  assert.equal(c2.status, 'in-progress');
 });

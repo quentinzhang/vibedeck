@@ -138,7 +138,16 @@ export async function buildHubStatus({ repoRoot } = {}) {
       const fields = fm ? parseFrontmatterFields(fm) : {};
 
       const frontmatterStatus = normalizeStatus(fields.status || '');
-      const status = folderStatus || frontmatterStatus || 'pending';
+      const status = frontmatterStatus || folderStatus || 'pending';
+
+      if (folderStatus && frontmatterStatus && folderStatus !== frontmatterStatus) {
+        warnings.push({
+          type: 'status_mismatch',
+          relPath,
+          folderStatus,
+          frontmatterStatus,
+        });
+      }
 
       const idRaw = String(fields.id || deriveIdFromFilename(filePath) || '').trim();
       const id = idRaw || path.basename(filePath, '.md');
@@ -156,8 +165,7 @@ export async function buildHubStatus({ repoRoot } = {}) {
       const due_at = due_at_raw && due_at_raw !== 'null' ? due_at_raw : null;
 
       counts.total += 1;
-      if (folderStatus) counts[folderStatus] += 1;
-      else if (STATUS_DIRS.includes(status)) counts[status] += 1;
+      if (STATUS_DIRS.includes(status)) counts[status] += 1;
 
       cards.push({
         project: name,

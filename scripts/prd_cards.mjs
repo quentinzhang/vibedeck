@@ -578,9 +578,8 @@ async function ensureProjectLayout({ hubRoot, projectName } = {}) {
   const projectRoot = path.join(hub, 'projects', name);
   await ensureDir(projectRoot);
   await ensureDir(path.join(projectRoot, 'templates'));
-  for (const s of STATUS_DIRS) {
-    await ensureDir(path.join(projectRoot, s));
-  }
+  // Cards live in the project root; only `archived/` remains folder-backed.
+  await ensureDir(path.join(projectRoot, 'archived'));
 }
 
 async function ensureProjectTemplate({ hubRoot, projectName } = {}) {
@@ -755,8 +754,8 @@ async function cmdNew(args) {
     severity = '';
   }
 
-  const status = normalizeStatus(args.status || 'drafts');
-  const dirName = STATUS_DIRS.includes(status) ? status : 'drafts';
+  const statusRaw = normalizeStatus(args.status || 'drafts');
+  const status = STATUS_DIRS.includes(statusRaw) ? statusRaw : 'drafts';
 
   const prefix = String(args.prefix || typeToPrefix(type)).trim().toUpperCase();
   const projectRoot = path.join(hubRoot, 'projects', projectName);
@@ -771,7 +770,9 @@ async function cmdNew(args) {
 
   const slug = String(args.slug || slugify(title)).trim();
   const fileName = `${id}-${slug}.md`;
-  const outPath = path.join(projectRoot, dirName, fileName);
+  const outPath = status === 'archived'
+    ? path.join(projectRoot, 'archived', fileName)
+    : path.join(projectRoot, fileName);
 
   const owner = String(args.owner || 'codex').trim();
   const reporter = String(args.reporter || '').trim();
@@ -786,7 +787,7 @@ async function cmdNew(args) {
     id,
     title,
     type,
-    status: dirName,
+    status,
     priority,
     severity: type === 'bug' ? severity : null,
     component,
@@ -901,11 +902,23 @@ async function cmdMove(args) {
   if (!abs.endsWith('.md')) throw new Error('Only Markdown files are allowed');
 
   const parts = relPath.split('/');
-  if (parts.length < 4 || parts[0] !== 'projects') throw new Error('Invalid relPath');
+  if (parts.length < 3 || parts[0] !== 'projects') throw new Error('Invalid relPath');
   const projectName = parts[1];
   const baseName = path.basename(abs);
-  const nextRel = `projects/${projectName}/${toStatus}/${baseName}`;
-  const nextAbs = path.join(hubRoot, 'projects', projectName, toStatus, baseName);
+  const fromFolderStatus = parts.length >= 4 ? normalizeStatus(parts[2]) : '';
+  const isArchivedPath = fromFolderStatus === 'archived';
+
+  // Default: do NOT move files when status changes (status is tracked in frontmatter).
+  // Exception: archived cards live under `archived/` to keep the main project root clean.
+  const nextAbs = toStatus === 'archived'
+    ? path.join(hubRoot, 'projects', projectName, 'archived', baseName)
+    : isArchivedPath
+      ? path.join(hubRoot, 'projects', projectName, baseName)
+      : abs;
+  const nextRel = path
+    .relative(hubRoot, nextAbs)
+    .split(path.sep)
+    .join('/');
 
   const original = await fs.readFile(abs, 'utf8');
   const match = original.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
@@ -931,12 +944,15 @@ async function cmdMove(args) {
   const nextText = `---\n${updated.join('\n')}\n---\n\n${rest.trimStart()}`;
 
   await ensureDir(path.dirname(nextAbs));
-  await fs.writeFile(nextAbs, nextText, { encoding: 'utf8', flag: abs === nextAbs ? 'w' : 'wx' });
-  if (abs !== nextAbs) {
+  if (abs === nextAbs) {
+    await fs.writeFile(nextAbs, nextText, { encoding: 'utf8', flag: 'w' });
+  } else {
+    await fs.writeFile(nextAbs, nextText, { encoding: 'utf8', flag: 'wx' });
     await fs.unlink(abs);
   }
 
-  console.log(`Moved: ${relPath} -> ${nextRel}`);
+  if (abs === nextAbs) console.log(`Updated: ${relPath} (status=${toStatus})`);
+  else console.log(`Moved: ${relPath} -> ${nextRel}`);
   if (args.sync === true) {
     await cmdSync({ hub: hubRoot });
   }
@@ -949,7 +965,7 @@ Usage:
   node scripts/prd_cards.mjs init [--hub <path>] [--project <name>] [--force]
   node scripts/prd_cards.mjs new --type bug|feature|improvement --title "..." [options]
   node scripts/prd_cards.mjs project:new [--hub <path>] [--project <name>] [--repo_path <abs>] [--non_interactive]
-  node scripts/prd_cards.mjs move --relPath projects/<project>/<status>/<file>.md --to <status> [--sync]
+  node scripts/prd_cards.mjs move --relPath projects/<project>/<file>.md --to <status> [--sync]
   node scripts/prd_cards.mjs sync [--hub <path>]
   node scripts/prd_cards.mjs validate [--hub <path>]
 

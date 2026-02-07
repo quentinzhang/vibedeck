@@ -19,7 +19,7 @@ When operating as a supervisor, follow `.agents/skills/prd-supervisor/SKILL.md` 
 
 ## Lifecycle (status machine)
 
-Status name = directory name (folder location is the source of truth). The card frontmatter `status` is optional and may be stale.
+The card frontmatter field `status` is the source of truth. Folder name is only a legacy fallback (older hubs stored cards under `projects/<project>/<status>/...`).
 
 - `drafts` (excluded from daily rotation)
 - `pending`
@@ -31,8 +31,9 @@ Status name = directory name (folder location is the source of truth). The card 
 
 Rule: when moving a card:
 
-- The file lives under `projects/<project>/<status>/...`
-- Update `updated_at` (and optionally `status` if you keep it)
+- Non-archived cards live under `projects/<project>/*.md`
+- Archived cards live under `projects/<project>/archived/*.md`
+- Update `status` and `updated_at` (file path stays stable except when entering/leaving `archived`)
 
 Recommended main flow: `drafts` → `pending` → `in-progress` → `in-review` → `done` → `archived`.
 
@@ -52,7 +53,7 @@ If you are not running autopilot, follow this routine:
 
 1. Run `npm run prd:sync` to refresh `STATUS.md` and `public/status.json`.
 2. Prefer continuing an existing `in-progress` card; otherwise pick one `pending` card by `priority` → `due_at` → impact.
-3. Move the chosen card to `in-progress` before coding (move file + update `updated_at`).
+3. Move the chosen card to `in-progress` before coding (update frontmatter `status` + `updated_at`).
 4. If spec/AC is incomplete, write questions under `Clarifications`, move to `blocked`, and stop.
 5. Implement strictly against Acceptance Criteria; keep changes small and reversible.
 6. Validate at least once (build/test or explicit manual steps) and record evidence in the card.

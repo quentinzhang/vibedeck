@@ -14,11 +14,10 @@ async function write(p, content) {
   await fs.writeFile(p, content, 'utf8');
 }
 
-test('prd_cards.mjs move moves file and updates frontmatter', async () => {
+test('prd_cards.mjs move updates frontmatter (no file move for non-archived statuses)', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-move-'));
   await write(path.join(tmp, 'AGENT.md'), '# mapping\n');
   await mkdirp(path.join(tmp, 'projects', 'p1', 'pending'));
-  await mkdirp(path.join(tmp, 'projects', 'p1', 'done'));
 
   const relPath = 'projects/p1/pending/BUG-0001-foo.md';
   await write(
@@ -44,9 +43,7 @@ test('prd_cards.mjs move moves file and updates frontmatter', async () => {
   );
   assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
 
-  const nextRel = 'projects/p1/done/BUG-0001-foo.md';
-  await assert.rejects(() => fs.stat(path.join(tmp, relPath)));
-  const moved = await fs.readFile(path.join(tmp, nextRel), 'utf8');
+  const moved = await fs.readFile(path.join(tmp, relPath), 'utf8');
 
   assert.match(moved, /^status:\s*\"done\"/m);
   const today = new Date().toISOString().slice(0, 10);

@@ -50,7 +50,7 @@ test('prd CLI supports project new, new, and list pending (with hub symlinked sk
       { encoding: 'utf8' },
     );
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
-    assert.equal(await exists(path.join(tmp, 'projects', 'p1', 'pending')), true);
+    assert.equal(await exists(path.join(tmp, 'projects', 'p1', 'archived')), true);
     const agent = await read(path.join(tmp, 'AGENT.md'));
     assert.match(agent, /- p1: \/tmp\/repo/);
   }
@@ -141,10 +141,10 @@ test('prd CLI supports move + archive and enforces unique ids per project', asyn
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
   }
 
-  const pendingDir = path.join(tmp, 'projects', 'p1', 'pending');
-  const [fileName] = (await fs.readdir(pendingDir)).filter((n) => n.endsWith('.md'));
+  const projectDir = path.join(tmp, 'projects', 'p1');
+  const [fileName] = (await fs.readdir(projectDir)).filter((n) => n.endsWith('.md'));
   assert.ok(fileName, 'expected one pending card file');
-  const relPath = `projects/p1/pending/${fileName}`;
+  const relPath = `projects/p1/${fileName}`;
 
   // Move to in-progress
   {
@@ -152,13 +152,13 @@ test('prd CLI supports move + archive and enforces unique ids per project', asyn
       encoding: 'utf8',
     });
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
-    const moved = await read(path.join(tmp, 'projects', 'p1', 'in-progress', fileName));
+    const moved = await read(path.join(tmp, 'projects', 'p1', fileName));
     assert.match(moved, /^status:\s*\"in-progress\"/m);
   }
 
   // Archive (shortcut)
   {
-    const res = spawnSync(process.execPath, [prdBin, 'archive', '--hub', tmp, '--relPath', `projects/p1/in-progress/${fileName}`], {
+    const res = spawnSync(process.execPath, [prdBin, 'archive', '--hub', tmp, '--relPath', `projects/p1/${fileName}`], {
       encoding: 'utf8',
     });
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));

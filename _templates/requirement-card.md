@@ -2,7 +2,7 @@
 id: BUG-0001
 title: "（一句话描述问题/改进）"
 type: bug # bug | feature | improvement
-status: drafts # optional; folder location is the source of truth (drafts | pending | in-progress | blocked | in-review | done | archived)
+status: drafts # source of truth (drafts | pending | in-progress | blocked | in-review | done | archived)
 priority: P2 # P0 | P1 | P2 | P3
 severity: S2 # (bug only) S0 | S1 | S2 | S3
 component: ui

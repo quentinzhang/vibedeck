@@ -85,39 +85,57 @@ test('prd_cards.mjs project:new creates project and mapping (non-interactive)', 
   assert.equal(stat.isDirectory(), true);
 });
 
-test('prd_cards.mjs new supports --template lite with minimal args (non-interactive)', async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-cli-'));
+test('prd_cards.mjs new prompts component with numeric options and allows custom input', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-component-'));
   await write(path.join(tmp, 'AGENT.md'), '- p1: /var/www/p1\n');
-  await mkdirp(path.join(tmp, 'projects'));
 
-  const script = path.join(
-    process.cwd(),
-    'scripts',
-    'prd_cards.mjs',
-  );
+  const script = path.join(process.cwd(), 'scripts', 'prd_cards.mjs');
 
-  const res = spawnSync(
-    process.execPath,
-    [
-      script,
-      'new',
-      '--hub',
-      tmp,
-      '--project',
-      'p1',
-      '--non_interactive',
-      '--template',
-      'lite',
-      '--title',
-      'Quick draft',
-      '--dry_run',
-    ],
-    { encoding: 'utf8' },
-  );
+  {
+    const res = spawnSync(
+      process.execPath,
+      [
+        script,
+        'new',
+        '--hub',
+        tmp,
+        '--project',
+        'p1',
+        '--type',
+        'bug',
+        '--title',
+        'Foo',
+        '--priority',
+        'P2',
+        '--dry_run',
+      ],
+      { encoding: 'utf8', input: '2\n', env: { ...process.env, CI: '' } },
+    );
+    assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
+    assert.match(res.stdout || '', /component:\s*\"api\"/);
+  }
 
-  assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
-  const out = (res.stdout || '') + (res.stderr || '');
-  assert.match(out, /##\s+Summary/);
-  assert.match(out, /\npriority:\s+\"\"/);
-  assert.match(out, /\ncomponent:\s+\"\"/);
+  {
+    const res = spawnSync(
+      process.execPath,
+      [
+        script,
+        'new',
+        '--hub',
+        tmp,
+        '--project',
+        'p1',
+        '--type',
+        'bug',
+        '--title',
+        'Foo',
+        '--priority',
+        'P2',
+        '--dry_run',
+      ],
+      { encoding: 'utf8', input: 'ml\n', env: { ...process.env, CI: '' } },
+    );
+    assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
+    assert.match(res.stdout || '', /component:\s*\"ml\"/);
+  }
 });

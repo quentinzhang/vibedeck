@@ -22,14 +22,15 @@ async function read(p) {
   return fs.readFile(p, 'utf8');
 }
 
-test('prd CLI supports project new, new, and list pending (with hub symlinked skills)', async () => {
+test('prd CLI supports project new, project list, new, and list pending (with hub symlinked skills)', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-cli-'));
+  const repoRoot = process.cwd();
 
   // Provide scripts/ and skills/ via symlink so tmp behaves like a hub root.
-  await fs.symlink('/var/www/prd/skills', path.join(tmp, 'skills'), 'dir');
-  await fs.symlink('/var/www/prd/scripts', path.join(tmp, 'scripts'), 'dir');
+  await fs.symlink(path.join(repoRoot, 'skills'), path.join(tmp, 'skills'), 'dir');
+  await fs.symlink(path.join(repoRoot, 'scripts'), path.join(tmp, 'scripts'), 'dir');
 
-  const prdBin = path.join('/var/www/prd', 'bin', 'prd.mjs');
+  const prdBin = path.join(repoRoot, 'bin', 'prd.mjs');
 
   // 1) Create project non-interactively
   {
@@ -55,7 +56,14 @@ test('prd CLI supports project new, new, and list pending (with hub symlinked sk
     assert.match(agent, /- p1: \/tmp\/repo/);
   }
 
-  // 2) Create a pending card non-interactively
+  // 2) Project list
+  {
+    const res = spawnSync(process.execPath, [prdBin, 'project', 'list', '--hub', tmp], { encoding: 'utf8' });
+    assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
+    assert.match(res.stdout || '', /- p1: \/tmp\/repo/);
+  }
+
+  // 3) Create a pending card non-interactively
   {
     const res = spawnSync(
       process.execPath,
@@ -83,7 +91,7 @@ test('prd CLI supports project new, new, and list pending (with hub symlinked sk
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
   }
 
-  // 3) List pending
+  // 4) List pending
   {
     const res = spawnSync(process.execPath, [prdBin, 'list', 'pending', '--hub', tmp], {
       encoding: 'utf8',
@@ -95,11 +103,12 @@ test('prd CLI supports project new, new, and list pending (with hub symlinked sk
 
 test('prd CLI supports move + archive and enforces unique ids per project', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-cli-move-'));
+  const repoRoot = process.cwd();
 
-  await fs.symlink('/var/www/prd/skills', path.join(tmp, 'skills'), 'dir');
-  await fs.symlink('/var/www/prd/scripts', path.join(tmp, 'scripts'), 'dir');
+  await fs.symlink(path.join(repoRoot, 'skills'), path.join(tmp, 'skills'), 'dir');
+  await fs.symlink(path.join(repoRoot, 'scripts'), path.join(tmp, 'scripts'), 'dir');
 
-  const prdBin = path.join('/var/www/prd', 'bin', 'prd.mjs');
+  const prdBin = path.join(repoRoot, 'bin', 'prd.mjs');
 
   // Create project
   {

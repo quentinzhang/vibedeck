@@ -85,6 +85,7 @@ From hub root:
 node ./bin/prd.mjs help
 node ./bin/prd.mjs sync --hub .
 node ./bin/prd.mjs project add --hub . --project <name> --repo-path <abs> --non-interactive
+node ./bin/prd.mjs project list --hub .
 node ./bin/prd.mjs add --hub . --project <name> --type bug --title "..." --priority P1 --component ui --status pending --non-interactive
 node ./bin/prd.mjs list pending --hub . --sync
 ```

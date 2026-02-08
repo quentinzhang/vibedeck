@@ -54,3 +54,6 @@ projects
 
 # public directory: ignore everything except screenshots
 public/*
+
+# Generated PRD board summary
+STATUS.md

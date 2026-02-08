@@ -12,6 +12,7 @@ function printHelp() {
 Usage:
   prd project add [--hub <path>] [--project <name>] [--repo-path <abs>] [--non-interactive] [--no-sync]
   prd project new [--hub <path>] [--project <name>] [--repo-path <abs>] [--non-interactive] [--no-sync]   (alias of project add)
+  prd project list [--hub <path>] [--json]
   prd add [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--status pending|...] [--non-interactive] [--no-sync] [...]
   prd new [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--status pending|...] [--non-interactive] [--no-sync] [...]   (alias of add)
   prd move [--hub <path>] --relPath projects/<project>/<file>.md --to <status> [--no-sync]
@@ -163,6 +164,17 @@ async function cmdProjectNew({ hubRoot, args }) {
   runNode(script, argv, { cwd: hubRoot });
 }
 
+async function cmdProjectList({ hubRoot, args }) {
+  const script = path.join(hubRoot, 'scripts', 'prd_cards.mjs');
+  const argv = [
+    'project:list',
+    '--hub',
+    hubRoot,
+    ...forwardFlag(args, 'json'),
+  ];
+  runNode(script, argv, { cwd: hubRoot });
+}
+
 async function cmdNew({ hubRoot, args, passthrough }) {
   const script = path.join(hubRoot, 'scripts', 'prd_cards.mjs');
   const argv = [
@@ -258,6 +270,11 @@ async function main() {
   if (cmd1 === 'project' && (cmd2 === 'add' || cmd2 === 'new')) {
     await cmdProjectNew({ hubRoot, args });
     if (shouldAutoSync) await cmdSync({ hubRoot });
+    return;
+  }
+
+  if (cmd1 === 'project' && cmd2 === 'list') {
+    await cmdProjectList({ hubRoot, args });
     return;
   }
 

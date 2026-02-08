@@ -324,6 +324,31 @@ async function listProjects(hubRoot) {
     .sort((a, b) => a.localeCompare(b));
 }
 
+async function listProjectComponents({ hubRoot, projectName } = {}) {
+  const hubRaw = String(hubRoot || '').trim();
+  const name = String(projectName || '').trim();
+  if (!hubRaw || !name) return [];
+
+  const hub = path.resolve(hubRaw);
+  const projectRoot = path.join(hub, 'projects', name);
+  const files = await listMarkdownFiles(projectRoot).catch(() => []);
+  const components = new Set();
+
+  await Promise.all(
+    files.map(async (filePath) => {
+      const text = await fs.readFile(filePath, 'utf8').catch(() => '');
+      if (!text) return;
+      const fm = extractFrontmatter(text);
+      if (!fm) return;
+      const fields = parseFrontmatterFields(fm);
+      const component = String(fields.component || '').trim();
+      if (component) components.add(component);
+    }),
+  );
+
+  return Array.from(components).sort((a, b) => a.localeCompare(b));
+}
+
 async function promptChoice({ question, choices, def }) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -347,6 +372,39 @@ async function promptChoice({ question, choices, def }) {
 
       // eslint-disable-next-line no-console
       console.log(`Invalid selection: ${answer}`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptChoiceOrText({ question, choices, def }) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const optionsText = choices.map((c, idx) => `${idx + 1}) ${c.label}`).join('\n');
+      const suffix = def ? ` (default: ${def})` : '';
+      const answer = (await rl.question(`${question}${suffix}\n${optionsText}\n> `)).trim();
+      if (!answer) return def;
+
+      if (/^[0-9]+$/.test(answer)) {
+        const n = Number.parseInt(answer, 10);
+        if (Number.isFinite(n) && n >= 1 && n <= choices.length) {
+          return choices[n - 1].value;
+        }
+        // eslint-disable-next-line no-console
+        console.log(`Invalid selection: ${answer}`);
+        continue;
+      }
+
+      const lowered = answer.toLowerCase();
+      const matched = choices.find(
+        (c) => c.value.toLowerCase() === lowered || c.label.toLowerCase() === lowered,
+      );
+      if (matched) return matched.value;
+
+      return answer;
     }
   } finally {
     rl.close();
@@ -669,6 +727,36 @@ async function cmdProjectNew(args) {
   console.log(`Project ready: ${projectName}`);
 }
 
+async function cmdProjectList(args) {
+  const hubRoot = await resolveHubRoot({
+    hubArg: args.hub,
+    env: process.env,
+    cwd: process.cwd(),
+    scriptPath: fileURLToPath(import.meta.url),
+  });
+
+  const agentPath = path.join(hubRoot, 'AGENT.md');
+  if (!(await fileExists(agentPath))) throw new Error(`Missing hub mapping file: ${agentPath}`);
+  const mappingText = await fs.readFile(agentPath, 'utf8');
+  const projects = parseAgentProjects(mappingText);
+
+  const items = Array.from(projects.entries())
+    .map(([project, repoPath]) => ({ project, repo_path: repoPath }))
+    .sort((a, b) => a.project.localeCompare(b.project));
+
+  if (args.json === true) {
+    process.stdout.write(`${JSON.stringify(items, null, 2)}\n`);
+    return;
+  }
+
+  if (items.length === 0) {
+    process.stdout.write('(none)\n');
+    return;
+  }
+
+  process.stdout.write(`${items.map((i) => `- ${i.project}: ${i.repo_path}`).join('\n')}\n`);
+}
+
 async function cmdNew(args) {
   const hubRoot = await resolveHubRoot({
     hubArg: args.hub,
@@ -725,7 +813,22 @@ async function cmdNew(args) {
   let component = String(args.component || '').trim();
   if (!component) {
     if (isNonInteractive(args)) throw new Error('Missing --component.');
-    component = String(await promptText({ question: 'Component', def: 'ui' })).trim();
+    const discovered = await listProjectComponents({ hubRoot, projectName });
+    const merged = [];
+    const seen = new Set();
+    for (const value of ['ui', 'api', ...discovered]) {
+      const c = String(value || '').trim();
+      if (!c || seen.has(c)) continue;
+      seen.add(c);
+      merged.push(c);
+    }
+    component = String(
+      await promptChoiceOrText({
+        question: 'Component (enter # or type custom)',
+        choices: merged.map((c) => ({ value: c, label: c })),
+        def: 'ui',
+      }),
+    ).trim();
   }
 
   let priority = normalizePriority(args.priority || '');
@@ -965,6 +1068,7 @@ Usage:
   node scripts/prd_cards.mjs init [--hub <path>] [--project <name>] [--force]
   node scripts/prd_cards.mjs new --type bug|feature|improvement --title "..." [options]
   node scripts/prd_cards.mjs project:new [--hub <path>] [--project <name>] [--repo_path <abs>] [--non_interactive]
+  node scripts/prd_cards.mjs project:list [--hub <path>] [--json]
   node scripts/prd_cards.mjs move --relPath projects/<project>/<file>.md --to <status> [--sync]
   node scripts/prd_cards.mjs sync [--hub <path>]
   node scripts/prd_cards.mjs validate [--hub <path>]
@@ -1013,6 +1117,10 @@ async function main() {
   }
   if (command === 'project:new') {
     await cmdProjectNew(args);
+    return;
+  }
+  if (command === 'project:list') {
+    await cmdProjectList(args);
     return;
   }
   if (command === 'new') {

@@ -35,7 +35,11 @@ export function hasMeaningfulAcceptanceCriteria(sectionText) {
       .replace(/^\-\s*/, '')
       .trim();
     if (!content) continue;
-    if (content.includes('（可验证') || content.includes('尽量避免') || content.includes('TBD') || content.includes('TODO')) continue;
+    const normalized = content.replace(/[()]/g, '').trim();
+    const lower = normalized.toLowerCase();
+    const isEnglishTemplatePlaceholder =
+      lower.includes('verifiable') && lower.includes('testable') && (lower.includes('avoid') || lower.includes('avoids')) && lower.includes('subjective');
+    if (content.includes('（可验证') || content.includes('尽量避免') || isEnglishTemplatePlaceholder || /\b(?:tbd|todo)\b/i.test(normalized)) continue;
     return true;
   }
   return false;
@@ -49,11 +53,31 @@ export function hasMeaningfulTestPlan(sectionText) {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    if (line === '- 构建/测试命令：' || line === '- 手动验证：' || line === '- 回归点：') continue;
-    const m = line.match(/^(?:-\s*)?(?:构建\/测试命令|手动验证|回归点)\s*：\s*(.+)$/);
-    if (m && String(m[1] || '').trim()) return true;
+    if (
+      line === '- 构建/测试命令：' ||
+      line === '- 手动验证：' ||
+      line === '- 回归点：' ||
+      line === '- Build/test commands:' ||
+      line === '- Manual validation:' ||
+      line === '- Regression areas:'
+    )
+      continue;
+
+    const m =
+      line.match(/^(?:-\s*)?(?:构建\/测试命令|手动验证|回归点)\s*：\s*(.+)$/) ||
+      line.match(/^(?:-\s*)?(?:build\/test commands|manual validation|regression areas)\s*:\s*(.+)$/i);
+    if (m && String(m[1] || '').trim()) {
+      const content = String(m[1] || '').trim();
+      if (/\b(?:tbd|todo)\b/i.test(content)) continue;
+      return true;
+    }
     if (line.includes('`') && line.length > 2) return true;
-    if (line.startsWith('-') && line.replace(/^\-\s*/, '').trim()) return true;
+    if (line.startsWith('-')) {
+      const content = line.replace(/^\-\s*/, '').trim();
+      if (!content) continue;
+      if (/\b(?:tbd|todo)\b/i.test(content)) continue;
+      return true;
+    }
   }
   return false;
 }
@@ -87,4 +111,3 @@ export function checkDefinitionOfReady({ cardText, frontmatter, dorMode }) {
 
   return { ok: missing.length === 0, missing };
 }
-

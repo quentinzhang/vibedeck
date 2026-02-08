@@ -7,13 +7,13 @@ Required skill:
 Card ID: FEAT-0002
 Project: prd
 Repo: /var/www/prd
-Worktree: /var/www/prd/.worktrees/FEAT-0002
-Date: 2026-02-05
-Started at: 2026-02-05T17:45:17.959Z
+Worktree: /var/www/prd/.worktrees/prd/FEAT-0002
+Date: 2026-02-07
+Started at: 2026-02-07T17:31:08.222Z
 
 Hard constraints:
 - Do NOT edit the PRD hub at /var/www/prd. Treat it as read-only.
-- Work ONLY inside the repo worktree at: /var/www/prd/.worktrees/FEAT-0002
+- Work ONLY inside the repo worktree at: /var/www/prd/.worktrees/prd/FEAT-0002
 - You MUST finish by emitting a FINAL JSON response matching the required output schema.
   - outcome: "in-review" if you implemented + validated the change.
   - outcome: "blocked" if you cannot proceed (missing info, cannot run validation, unclear AC, etc.).
@@ -22,16 +22,16 @@ PRD card content:
 ---
 ---
 id: "FEAT-0002"
-title: "在查看prd详情时，判断worktree下的result log是否存在，如果存在则提供查看log的按钮，点击在html界面中显示log"
+title: "需求卡全部使用英文撰写，需更新requirement-card.md"
 type: "feature" # bug | feature | improvement
-status: "pending" # # # # # optional; folder location is the source of truth (drafts | pending | in-progress | blocked | in-review | done | archived)
-priority: "P1" # P0 | P1 | P2 | P3
+status: "pending" # optional; folder location is the source of truth (drafts | pending | in-progress | blocked | in-review | done | archived)
+priority: "P2" # P0 | P1 | P2 | P3
 severity: null # (bug only) S0 | S1 | S2 | S3
 component: "feature"
 owner: "codex"
 reporter: ""
-created_at: "2026-02-05"
-updated_at: "2026-02-05"
+created_at: "2026-02-07"
+updated_at: "2026-02-07"
 due_at: null
 spec: "self" # self | <path> | <url>
 related_files: []
@@ -94,34 +94,6 @@ estimate: "" # XS | S | M | L
 - Next:
 - Blockers:
 - Notes:
-
-## Autopilot
-
-### 2026-02-05
-
-- Project: `prd`
-- Card: `FEAT-0002`
-- tmux: `prd-prd-FEAT-0002`
-- Repo: `/var/www/prd`
-- Worktree: `/var/www/prd/.worktrees/FEAT-0002`
-- Outcome: `blocked`
-- Summary: Invalid JSON output from worker
-- Blockers:
-  - Invalid JSON output
-
-## Autopilot
-
-### 2026-02-05
-
-- Project: `prd`
-- Card: `FEAT-0002`
-- tmux: `prd-prd-FEAT-0002`
-- Repo: `/var/www/prd`
-- Worktree: `/var/www/prd/.worktrees/FEAT-0002`
-- Outcome: `blocked`
-- Summary: Invalid JSON output from worker
-- Blockers:
-  - Invalid JSON output
 ---
 
 Now begin.

@@ -1,6 +1,6 @@
 ---
 id: BUG-0001
-title: "（一句话描述问题/改进）"
+title: "One-line summary of the issue/improvement"
 type: bug # bug | feature | improvement
 status: drafts # source of truth (drafts | pending | in-progress | blocked | in-review | done | archived)
 priority: P2 # P0 | P1 | P2 | P3
@@ -18,50 +18,50 @@ labels: []
 estimate: "" # XS | S | M | L
 ---
 
-## 背景 / 问题陈述
+## Background / Problem Statement
 
-## 影响范围
+## Impact
 
-- 用户影响：
-- 影响环境/浏览器/设备：
-- 影响组件：
+- User impact:
+- Environment / browser / device:
+- Components affected:
 
-## 当前行为（Current）
+## Current Behavior
 
-## 期望行为（Expected）
+## Expected Behavior
 
-## 复现步骤（仅 Bug）
+## Reproduction Steps (Bug Only)
 
 1.
 2.
 3.
 
-## 方案 / 设计（可选）
+## Solution / Design (Optional)
 
-## 验收标准（Acceptance Criteria）
+## Acceptance Criteria
 
-- [ ] （可验证、可测试，尽量避免主观描述）
+- [ ] (Verifiable, testable, and avoids subjective wording)
 
-## 测试计划
+## Test Plan
 
-- 构建/测试命令：
-- 手动验证：
-- 回归点：
+- Build/test commands:
+- Manual validation:
+- Regression areas:
 
-## 风险 & 回滚
+## Risks & Rollback
 
-- 风险：
-- 回滚方式：
+- Risks:
+- Rollback plan:
 
-## 交付物 / 结果（Done 时填写）
+## Deliverables / Results (Fill When Done)
 
-- 代码变更：
-- 验证证据（命令输出/截图/录屏/日志）：
-- 影响与兼容性说明：
+- Code changes:
+- Validation evidence (command output / screenshot / recording / logs):
+- Impact & compatibility notes:
 
 ## Clarifications / Open Questions
 
-- （不确定点、需要澄清的问题）
+- Open questions / points needing clarification.
 
 ## Progress Log
 

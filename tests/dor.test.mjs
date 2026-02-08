@@ -39,9 +39,26 @@ test('checkDefinitionOfReady is strict by mode', () => {
   assert.equal(checkDefinitionOfReady({ cardText, frontmatter, dorMode: 'off' }).ok, true);
 });
 
+test('checkDefinitionOfReady treats English template placeholders as not meaningful', () => {
+  const cardText = `
+## Acceptance Criteria
+
+- [ ] (Verifiable, testable, and avoids subjective wording)
+
+## Test Plan
+
+- Build/test commands:
+- Manual validation:
+- Regression areas:
+`;
+
+  const frontmatter = { component: 'ui' };
+
+  assert.equal(checkDefinitionOfReady({ cardText, frontmatter, dorMode: 'strict' }).ok, false);
+});
+
 test('checkDefinitionOfReady still requires component in loose/strict', () => {
   assert.equal(checkDefinitionOfReady({ cardText: '', frontmatter: {}, dorMode: 'loose' }).ok, false);
   assert.equal(checkDefinitionOfReady({ cardText: '', frontmatter: {}, dorMode: 'strict' }).ok, false);
   assert.equal(checkDefinitionOfReady({ cardText: '', frontmatter: {}, dorMode: 'off' }).ok, true);
 });
-

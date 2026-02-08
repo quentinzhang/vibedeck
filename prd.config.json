@@ -1,0 +1,8 @@
+{
+  "projectsDir": "projects",
+  "autopilot": {
+    "maxParallel": 2
+  },
+  "editor": "cursor"
+}
+

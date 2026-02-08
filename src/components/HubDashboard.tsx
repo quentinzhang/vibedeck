@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { HubCard, HubStatusData, PrdStatus, ProjectSummary } from '../lib/statusModel';
+import type { HubCard, HubStatusData, PrdPriority, PrdStatus, ProjectSummary } from '../lib/statusModel';
 import { getProjectAccentColor, getProjectAccentSoftColor } from '../lib/projectColors';
 import CardPreviewDrawer from './CardPreviewDrawer';
 import ProjectSummaryGrid from './ProjectSummaryGrid';
@@ -23,6 +23,8 @@ const STATUS_LABEL: Record<PrdStatus, string> = {
   done: 'Done',
   archived: 'Archived',
 };
+
+const PRIORITY_ORDER: PrdPriority[] = ['P0', 'P1', 'P2', 'P3'];
 
 const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
@@ -111,7 +113,7 @@ export default function HubDashboard() {
   const [dragOver, setDragOver] = useState<PrdStatus | null>(null);
 
   const [selectedProject, setSelectedProject] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<PrdStatus | 'all'>('all');
+  const [priorityFilter, setPriorityFilter] = useState<PrdPriority | 'all'>('all');
   const [query, setQuery] = useState('');
 
   const [visibleStatuses, setVisibleStatuses] = useState<PrdStatus[]>(() => {
@@ -224,14 +226,14 @@ export default function HubDashboard() {
     return list
       .filter((c) => {
         if (selectedProject !== 'all' && c.project !== selectedProject) return false;
-        if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+        if (priorityFilter !== 'all' && c.priority !== priorityFilter) return false;
         if (!q) return true;
         const haystack = `${c.project} ${c.id} ${c.title} ${c.component || ''} ${c.relPath}`.toLowerCase();
         return haystack.includes(q);
       })
       .slice()
       .sort(byPriorityThenUpdatedDesc);
-  }, [data, query, selectedProject, statusFilter]);
+  }, [data, query, selectedProject, priorityFilter]);
 
   const cardsByStatus = useMemo(() => {
     const map = new Map<PrdStatus, HubCard[]>();
@@ -328,14 +330,14 @@ export default function HubDashboard() {
               ))}
             </select>
             <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as PrdStatus | 'all')}
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value as PrdPriority | 'all')}
               className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
             >
-              <option value="all">All statuses</option>
-              {STATUS_ORDER.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABEL[s]}
+              <option value="all">All priorities</option>
+              {PRIORITY_ORDER.map((p) => (
+                <option key={p} value={p}>
+                  {p}
                 </option>
               ))}
             </select>

@@ -270,17 +270,34 @@ export default defineConfig(() => {
           if (!repoPath) throw new Error(`Unknown project: ${project}`);
 
           const runKey = sanitizeKey(`${project}-${cardId}`);
-          const worktreePath = path.join(repoPath, '.worktrees', cardId);
-          const logAbs = path.resolve(
-            worktreePath,
-            '.prd-autopilot',
-            'results',
-            `${runKey}.log`,
-          );
-          const baseWithSep = worktreePath.endsWith(path.sep) ? worktreePath : `${worktreePath}${path.sep}`;
-          if (!logAbs.startsWith(baseWithSep)) throw new Error('Invalid log path');
+          const projectKey = sanitizeKey(project);
+          const cardKey = sanitizeKey(cardId);
+          const worktreeCandidates = [
+            // Current: worktrees are namespaced by project to avoid collisions.
+            path.join(repoPath, '.worktrees', projectKey, cardKey),
+            // Legacy: worktrees were directly under `.worktrees/<CARD_ID>`.
+            path.join(repoPath, '.worktrees', cardKey),
+          ];
 
-          const { text } = await readLogText(logAbs, { maxBytes: 1024 * 1024 });
+          let text = '';
+          /** @type {any} */
+          let lastErr = null;
+          for (const worktreePath of worktreeCandidates) {
+            const logAbs = path.resolve(worktreePath, '.prd-autopilot', 'results', `${runKey}.log`);
+            const baseWithSep = worktreePath.endsWith(path.sep) ? worktreePath : `${worktreePath}${path.sep}`;
+            if (!logAbs.startsWith(baseWithSep)) throw new Error('Invalid log path');
+            try {
+              ({ text } = await readLogText(logAbs, { maxBytes: 1024 * 1024 }));
+              lastErr = null;
+              break;
+            } catch (err: any) {
+              lastErr = err;
+              if (err?.code === 'ENOENT') continue;
+              throw err;
+            }
+          }
+          if (lastErr?.code === 'ENOENT') throw lastErr;
+
           res.statusCode = 200;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end(text);

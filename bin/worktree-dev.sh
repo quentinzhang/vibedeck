@@ -41,10 +41,10 @@ fi
 cd -- "${worktree_dir}"
 
 rm -rf projects
-ln -sfn ../../projects projects
+ln -sfn ../../../projects projects
 
 mkdir -p public
-ln -sfn ../../public/status.json public/status.json
+ln -sfn ../../../../public/status.json public/status.json
 
 # exec npm run dev
 

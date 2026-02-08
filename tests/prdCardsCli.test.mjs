@@ -84,3 +84,40 @@ test('prd_cards.mjs project:new creates project and mapping (non-interactive)', 
   const stat = await fs.stat(archivedDir);
   assert.equal(stat.isDirectory(), true);
 });
+
+test('prd_cards.mjs new supports --template lite with minimal args (non-interactive)', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-cli-'));
+  await write(path.join(tmp, 'AGENT.md'), '- p1: /var/www/p1\n');
+  await mkdirp(path.join(tmp, 'projects'));
+
+  const script = path.join(
+    process.cwd(),
+    'scripts',
+    'prd_cards.mjs',
+  );
+
+  const res = spawnSync(
+    process.execPath,
+    [
+      script,
+      'new',
+      '--hub',
+      tmp,
+      '--project',
+      'p1',
+      '--non_interactive',
+      '--template',
+      'lite',
+      '--title',
+      'Quick draft',
+      '--dry_run',
+    ],
+    { encoding: 'utf8' },
+  );
+
+  assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
+  const out = (res.stdout || '') + (res.stderr || '');
+  assert.match(out, /##\s+Summary/);
+  assert.match(out, /\npriority:\s+\"\"/);
+  assert.match(out, /\ncomponent:\s+\"\"/);
+});

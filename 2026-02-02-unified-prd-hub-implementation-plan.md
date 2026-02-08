@@ -37,7 +37,7 @@ Cards live **centrally** in this repo:
 - `projects/<project>/blocked/`
 - `projects/<project>/done/`
 - `projects/<project>/archived/`
-- `projects/<project>/templates/` (optional)
+- `projects/<project>/templates/` (deprecated; use `_templates/` shared template)
 
 Each card is a Markdown file with YAML frontmatter (compatible with the existing `realtime-google/prd` convention and the `prd-card-manager` schema).
 
@@ -261,4 +261,3 @@ Provide a single internal page (e.g. `/prd.html` or `/index.html`) with:
 - Run sync before browsing: `node scripts/prd-sync.mjs`
 - Dev server: `npm run dev`
 - Build (static): `npm run build` then serve `dist/` (requires `status.json` generated at build time or shipped in `public/`).
-

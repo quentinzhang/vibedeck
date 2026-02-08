@@ -12,8 +12,9 @@ function printHelp() {
 Usage:
   prd project add [--hub <path>] [--project <name>] [--repo-path <abs>] [--non-interactive] [--no-sync]
   prd project new [--hub <path>] [--project <name>] [--repo-path <abs>] [--non-interactive] [--no-sync]   (alias of project add)
-  prd add [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--status pending|...] [--non-interactive] [--no-sync] [...]
-  prd new [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--status pending|...] [--non-interactive] [--no-sync] [...]   (alias of add)
+  prd add [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--template full|lite] [--status pending|...] [--non-interactive] [--no-sync] [...]
+  prd new [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--template full|lite] [--status pending|...] [--non-interactive] [--no-sync] [...]   (alias of add)
+  prd create [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--template full|lite] [--status pending|...] [--non-interactive] [--no-sync] [...] (alias of add)
   prd move [--hub <path>] --relPath projects/<project>/<file>.md --to <status> [--no-sync]
   prd archive [--hub <path>] --relPath projects/<project>/<file>.md [--no-sync]
   prd list pending [--hub <path>] [--project <name>] [--json] [--sync]
@@ -262,6 +263,11 @@ async function main() {
   }
 
   if (cmd1 === 'add' || cmd1 === 'new') {
+    await cmdNew({ hubRoot, args, passthrough: rest });
+    if (shouldAutoSync) await cmdSync({ hubRoot });
+    return;
+  }
+  if (cmd1 === 'create') {
     await cmdNew({ hubRoot, args, passthrough: rest });
     if (shouldAutoSync) await cmdSync({ hubRoot });
     return;

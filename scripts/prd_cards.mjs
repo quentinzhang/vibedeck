@@ -61,6 +61,14 @@ function typeToPrefix(type) {
   return 'CARD';
 }
 
+function normalizeTemplateName(raw) {
+  const original = String(raw ?? '').trim();
+  const v = original.toLowerCase();
+  if (!v || v === 'full' || v === 'default' || v === 'standard') return 'full';
+  if (v === 'lite' || v === 'light' || v === 'short' || v === 'brief' || v === 'minimal') return 'lite';
+  return original;
+}
+
 function splitValueAndComment(rawValue) {
   const idx = String(rawValue || '').indexOf(' #');
   if (idx === -1) return { value: String(rawValue || '').trim(), comment: '' };
@@ -474,13 +482,8 @@ function deriveIdFromFilename(filePath) {
   return `${m[1]}-${m[2]}`;
 }
 
-async function pickTemplate({ hubRoot, projectName }) {
-  const candidatePaths = [
-    path.join(hubRoot, 'projects', projectName, 'templates', 'requirement-card.md'),
-    path.join(hubRoot, '_templates', 'requirement-card.md'),
-    // Back-compat: legacy shared template location.
-    path.join(hubRoot, 'projects', '_templates', 'requirement-card.md'),
-  ];
+async function pickTemplate({ hubRoot }) {
+  const candidatePaths = [path.join(hubRoot, '_templates', 'requirement-card.md')];
   for (const p of candidatePaths) {
     if (await fileExists(p)) return await fs.readFile(p, 'utf8');
   }
@@ -490,14 +493,34 @@ async function pickTemplate({ hubRoot, projectName }) {
   const repoRoot = path.resolve(scriptDir, '..');
   const repoCandidateTemplates = [
     path.join(repoRoot, '_templates', 'requirement-card.md'),
-    // Back-compat: legacy repo template location.
-    path.join(repoRoot, 'projects', '_templates', 'requirement-card.md'),
   ];
   for (const p of repoCandidateTemplates) {
     if (await fileExists(p)) return await fs.readFile(p, 'utf8');
   }
 
   throw new Error('requirement-card template not found');
+}
+
+async function pickTemplateByName({ hubRoot, templateName }) {
+  const name = normalizeTemplateName(templateName);
+  if (name === 'full') return await pickTemplate({ hubRoot });
+
+  if (name === 'lite') {
+    const candidate = path.join(hubRoot, '_templates', 'requirement-card-lite.md');
+    if (await fileExists(candidate)) return await fs.readFile(candidate, 'utf8');
+
+    const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+    const repoRoot = path.resolve(scriptDir, '..');
+    const repoCandidate = path.join(repoRoot, '_templates', 'requirement-card-lite.md');
+    if (await fileExists(repoCandidate)) return await fs.readFile(repoCandidate, 'utf8');
+
+    throw new Error('requirement-card-lite template not found');
+  }
+
+  // Allow custom paths: absolute or relative to hub root.
+  const resolved = looksLikeAbsolutePath(name) ? path.resolve(expandHome(name)) : path.resolve(hubRoot, name);
+  if (await fileExists(resolved)) return await fs.readFile(resolved, 'utf8');
+  throw new Error(`Unknown --template: ${templateName} (expected: full|lite or a .md path)`);
 }
 
 async function ensureHubLayout({ hubRoot, force = false } = {}) {
@@ -547,10 +570,6 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
       path.join(assetsRoot, '_templates', 'requirement-card.md'),
       path.join(legacyAssetsRoot, '_templates', 'requirement-card.md'),
       path.join(repoRoot, '_templates', 'requirement-card.md'),
-      // Back-compat: legacy locations.
-      path.join(assetsRoot, 'projects', '_templates', 'requirement-card.md'),
-      path.join(legacyAssetsRoot, 'projects', '_templates', 'requirement-card.md'),
-      path.join(repoRoot, 'projects', '_templates', 'requirement-card.md'),
     ],
     destPath: path.join(hub, '_templates', 'requirement-card.md'),
     fallbackContent:
@@ -568,6 +587,29 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
       '## Background\n\n## Acceptance Criteria\n\n- [ ] \n',
     force,
   });
+
+  await copyOrWrite({
+    srcPaths: [
+      path.join(assetsRoot, '_templates', 'requirement-card-lite.md'),
+      path.join(legacyAssetsRoot, '_templates', 'requirement-card-lite.md'),
+      path.join(repoRoot, '_templates', 'requirement-card-lite.md'),
+    ],
+    destPath: path.join(hub, '_templates', 'requirement-card-lite.md'),
+    fallbackContent:
+      '---\n' +
+      'id: BUG-0001\n' +
+      'title: ""\n' +
+      'type: bug\n' +
+      'status: drafts\n' +
+      'priority: ""\n' +
+      'component: ""\n' +
+      'created_at: YYYY-MM-DD\n' +
+      'updated_at: YYYY-MM-DD\n' +
+      'spec: self\n' +
+      '---\n\n' +
+      '## Summary\n\n## Notes\n',
+    force,
+  });
 }
 
 async function ensureProjectLayout({ hubRoot, projectName } = {}) {
@@ -577,24 +619,8 @@ async function ensureProjectLayout({ hubRoot, projectName } = {}) {
 
   const projectRoot = path.join(hub, 'projects', name);
   await ensureDir(projectRoot);
-  await ensureDir(path.join(projectRoot, 'templates'));
   // Cards live in the project root; only `archived/` remains folder-backed.
   await ensureDir(path.join(projectRoot, 'archived'));
-}
-
-async function ensureProjectTemplate({ hubRoot, projectName } = {}) {
-  const hub = path.resolve(hubRoot);
-  const name = String(projectName || '').trim();
-  if (!name) throw new Error('Missing --project');
-
-  const projectTemplate = path.join(hub, 'projects', name, 'templates', 'requirement-card.md');
-  if (await fileExists(projectTemplate)) return;
-
-  const sharedTemplate = path.join(hub, '_templates', 'requirement-card.md');
-  if (await fileExists(sharedTemplate)) {
-    await copyFileIfMissing(sharedTemplate, projectTemplate, { force: false });
-    return;
-  }
 }
 
 async function cmdInit(args) {
@@ -630,7 +656,6 @@ async function cmdProjectNew(args) {
   if (!projectName) throw new Error('Invalid project name');
 
   await ensureProjectLayout({ hubRoot, projectName });
-  await ensureProjectTemplate({ hubRoot, projectName });
 
   const agentPath = path.join(hubRoot, 'AGENT.md');
   const mappingText = (await fileExists(agentPath)) ? await fs.readFile(agentPath, 'utf8') : '';
@@ -698,7 +723,11 @@ async function cmdNew(args) {
 
   await ensureProjectLayout({ hubRoot, projectName });
 
+  const templateName = String(args.template || '').trim();
+  const isLiteTemplate = normalizeTemplateName(templateName) === 'lite';
+
   let type = normalizeType(args.type || '');
+  if (!type && isLiteTemplate) type = 'bug';
   if (!type) {
     if (isNonInteractive(args)) throw new Error('Missing/invalid --type. Use bug|feature|improvement.');
     type = normalizeType(
@@ -724,27 +753,35 @@ async function cmdNew(args) {
 
   let component = String(args.component || '').trim();
   if (!component) {
-    if (isNonInteractive(args)) throw new Error('Missing --component.');
-    component = String(await promptText({ question: 'Component', def: 'ui' })).trim();
+    if (isLiteTemplate) {
+      component = '';
+    } else {
+      if (isNonInteractive(args)) throw new Error('Missing --component.');
+      component = String(await promptText({ question: 'Component', def: 'ui' })).trim();
+    }
   }
 
   let priority = normalizePriority(args.priority || '');
   if (!priority) {
-    if (isNonInteractive(args)) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
-    priority = normalizePriority(
-      await promptChoice({
-        question: 'Priority',
-        choices: [
-          { value: 'P0', label: 'P0' },
-          { value: 'P1', label: 'P1' },
-          { value: 'P2', label: 'P2' },
-          { value: 'P3', label: 'P3' },
-        ],
-        def: 'P2',
-      }),
-    );
+    if (isLiteTemplate) {
+      priority = '';
+    } else {
+      if (isNonInteractive(args)) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
+      priority = normalizePriority(
+        await promptChoice({
+          question: 'Priority',
+          choices: [
+            { value: 'P0', label: 'P0' },
+            { value: 'P1', label: 'P1' },
+            { value: 'P2', label: 'P2' },
+            { value: 'P3', label: 'P3' },
+          ],
+          def: 'P2',
+        }),
+      );
+    }
   }
-  if (!priority) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
+  if (!priority && !isLiteTemplate) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
 
   let severity = normalizeSeverity(args.severity || '');
   if (type === 'bug') {
@@ -782,7 +819,7 @@ async function cmdNew(args) {
   const spec = String(args.spec || 'self').trim();
 
   const today = getToday();
-  const templateText = await pickTemplate({ hubRoot, projectName });
+  const templateText = await pickTemplateByName({ hubRoot, templateName });
   const content = applyOverridesToTemplate(templateText, {
     id,
     title,
@@ -964,6 +1001,7 @@ function printHelp() {
 Usage:
   node scripts/prd_cards.mjs init [--hub <path>] [--project <name>] [--force]
   node scripts/prd_cards.mjs new --type bug|feature|improvement --title "..." [options]
+  node scripts/prd_cards.mjs create --type bug|feature|improvement --title "..." [options]   (alias of new)
   node scripts/prd_cards.mjs project:new [--hub <path>] [--project <name>] [--repo_path <abs>] [--non_interactive]
   node scripts/prd_cards.mjs move --relPath projects/<project>/<file>.md --to <status> [--sync]
   node scripts/prd_cards.mjs sync [--hub <path>]
@@ -977,6 +1015,7 @@ Common:
 new options:
   --project <name>    required; when omitted, prompts to select from <hub>/projects/
   --repo <path>       optional; if set and mapped in <hub>/AGENT.md, used as default selection
+  --template full|lite|<path>  card body template (default: full)
   --status drafts|pending|in-progress|in-review|blocked|done|archived
   --priority P0|P1|P2|P3
   --severity S0|S1|S2|S3 (bug only)
@@ -1015,7 +1054,7 @@ async function main() {
     await cmdProjectNew(args);
     return;
   }
-  if (command === 'new') {
+  if (command === 'new' || command === 'create') {
     await cmdNew(args);
     return;
   }

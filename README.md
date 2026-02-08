@@ -43,7 +43,7 @@ Security note: the built-in API is local-only by default. Set `PRD_DASHBOARD_ALL
 
 - `projects/<project>/*.md`: requirement cards (non-archived; local-only; ignored by git)
 - `projects/<project>/archived/*.md`: archived cards (excluded from daily rotation)
-- `_templates/requirement-card.md`: default card template (projects may override under `projects/<project>/templates/`, also local-only)
+- `_templates/requirement-card.md`: shared card template (used for all projects)
 - `AGENT.md`: Project → Repo mapping (used by scripts and autopilot)
 - `STATUS.md` and `public/status.json`: generated board index (via `prd:sync`)
 
@@ -86,6 +86,7 @@ node ./bin/prd.mjs help
 node ./bin/prd.mjs sync --hub .
 node ./bin/prd.mjs project add --hub . --project <name> --repo-path <abs> --non-interactive
 node ./bin/prd.mjs add --hub . --project <name> --type bug --title "..." --priority P1 --component ui --status pending --non-interactive
+node ./bin/prd.mjs add --hub . --project <name> --template lite --title "Quick draft" --non-interactive
 node ./bin/prd.mjs list pending --hub . --sync
 ```
 
@@ -102,6 +103,7 @@ Run it via the CLI wrapper:
 
 ```bash
 node ./bin/prd.mjs autopilot tick --hub . --project <name> --max-parallel 2
+node ./bin/prd.mjs autopilot tick --hub . --project <name> --max-parallel 2 --dor off
 ```
 
 Notes:

@@ -81,12 +81,14 @@ This repo exposes a `prd` CLI wrapper around the hub scripts. If `prd` is not on
 
 From hub root:
 
+Default card template is `lite`; pass `--template full` for the detailed template.
+
 ```bash
 node ./bin/prd.mjs help
 node ./bin/prd.mjs sync --hub .
 node ./bin/prd.mjs project add --hub . --project <name> --repo-path <abs> --non-interactive
 node ./bin/prd.mjs project list --hub .
-node ./bin/prd.mjs add --hub . --project <name> --type bug --title "..." --priority P1 --component ui --status pending --non-interactive
+node ./bin/prd.mjs add --hub . --project <name> --template full --type bug --title "..." --priority P1 --component ui --status pending --non-interactive
 node ./bin/prd.mjs add --hub . --project <name> --template lite --title "Quick draft" --non-interactive
 node ./bin/prd.mjs list pending --hub . --sync
 ```

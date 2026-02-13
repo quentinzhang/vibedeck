@@ -23,6 +23,7 @@ Usage:
 
 Notes:
   - Project → Repo mapping is read from: <hub>/AGENT.md (machine-parsed section)
+  - Card template defaults to lite; pass --template full for the detailed template
   - This CLI wraps existing hub scripts under <hub>/scripts and <hub>/skills.
 `);
 }

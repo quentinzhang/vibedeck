@@ -811,7 +811,7 @@ async function cmdNew(args) {
 
   await ensureProjectLayout({ hubRoot, projectName });
 
-  const templateName = String(args.template || '').trim();
+  const templateName = String(args.template ?? 'lite').trim();
   const isLiteTemplate = normalizeTemplateName(templateName) === 'lite';
 
   let type = normalizeType(args.type || '');
@@ -1115,7 +1115,7 @@ Common:
 new options:
   --project <name>    required; when omitted, prompts to select from <hub>/projects/
   --repo <path>       optional; if set and mapped in <hub>/AGENT.md, used as default selection
-  --template full|lite|<path>  card body template (default: full)
+  --template full|lite|<path>  card body template (default: lite)
   --status drafts|pending|in-progress|in-review|blocked|done|archived
   --priority P0|P1|P2|P3
   --severity S0|S1|S2|S3 (bug only)

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HubCard, HubStatusData, PrdPriority, PrdStatus, ProjectSummary } from '../lib/statusModel';
 import { getProjectAccentColor, getProjectAccentSoftColor } from '../lib/projectColors';
 import CardPreviewDrawer from './CardPreviewDrawer';
@@ -111,6 +111,9 @@ export default function HubDashboard() {
     null,
   );
   const [dragOver, setDragOver] = useState<PrdStatus | null>(null);
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const dragScrollingRef = useRef<{ active: boolean; raf: number | null }>({ active: false, raf: null });
 
   const [selectedProject, setSelectedProject] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<PrdPriority | 'all'>('all');
@@ -299,6 +302,61 @@ export default function HubDashboard() {
     });
   }, []);
 
+  const stopDragAutoScroll = useCallback(() => {
+    dragScrollingRef.current.active = false;
+    dragPointerRef.current = null;
+    if (dragScrollingRef.current.raf !== null) {
+      window.cancelAnimationFrame(dragScrollingRef.current.raf);
+      dragScrollingRef.current.raf = null;
+    }
+  }, []);
+
+  const startDragAutoScroll = useCallback(() => {
+    if (dragScrollingRef.current.raf !== null) return;
+    dragScrollingRef.current.active = true;
+
+    const EDGE_PX = 80;
+    const MAX_SPEED_PX = 18;
+
+    const tick = () => {
+      if (!dragScrollingRef.current.active) {
+        dragScrollingRef.current.raf = null;
+        return;
+      }
+
+      const viewport = scrollViewportRef.current;
+      const pointer = dragPointerRef.current;
+      if (viewport && pointer) {
+        const rect = viewport.getBoundingClientRect();
+        if (pointer.y >= rect.top && pointer.y <= rect.bottom) {
+          const distLeft = pointer.x - rect.left;
+          const distRight = rect.right - pointer.x;
+          let delta = 0;
+
+          if (distLeft >= 0 && distLeft < EDGE_PX) {
+            const intensity = Math.min(1, (EDGE_PX - distLeft) / EDGE_PX);
+            delta = -Math.round(1 + intensity * (MAX_SPEED_PX - 1));
+          } else if (distRight >= 0 && distRight < EDGE_PX) {
+            const intensity = Math.min(1, (EDGE_PX - distRight) / EDGE_PX);
+            delta = Math.round(1 + intensity * (MAX_SPEED_PX - 1));
+          }
+
+          if (delta !== 0) {
+            const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+            const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, viewport.scrollLeft + delta));
+            if (nextScrollLeft !== viewport.scrollLeft) viewport.scrollLeft = nextScrollLeft;
+          }
+        }
+      }
+
+      dragScrollingRef.current.raf = window.requestAnimationFrame(tick);
+    };
+
+    dragScrollingRef.current.raf = window.requestAnimationFrame(tick);
+  }, []);
+
+  useEffect(() => stopDragAutoScroll, [stopDragAutoScroll]);
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="mx-auto max-w-7xl px-4 py-8">
@@ -445,7 +503,17 @@ export default function HubDashboard() {
           />
         ) : null}
 
-        <div className="mt-6 overflow-x-auto pb-2">
+        <div
+          ref={scrollViewportRef}
+          className="mt-6 overflow-x-auto pb-2"
+          onDragOverCapture={(e) => {
+            if (!dragScrollingRef.current.active) return;
+            dragPointerRef.current = { x: e.clientX, y: e.clientY };
+          }}
+          onDrop={() => {
+            stopDragAutoScroll();
+          }}
+        >
           <div
             className="grid gap-4"
             style={{
@@ -462,6 +530,7 @@ export default function HubDashboard() {
                   }`}
                   onDragOver={(e) => {
                     e.preventDefault();
+                    dragPointerRef.current = { x: e.clientX, y: e.clientY };
                     setDragOver(status);
                   }}
                   onDragLeave={() => {
@@ -469,6 +538,7 @@ export default function HubDashboard() {
                   }}
                   onDrop={(e) => {
                     e.preventDefault();
+                    stopDragAutoScroll();
                     const relPath = e.dataTransfer.getData('text/plain');
                     setDragOver(null);
                     if (!relPath) return;
@@ -500,6 +570,17 @@ export default function HubDashboard() {
                             onDragStart={(e) => {
                               e.dataTransfer.setData('text/plain', c.relPath);
                               e.dataTransfer.effectAllowed = 'move';
+                              dragPointerRef.current = { x: e.clientX, y: e.clientY };
+                              startDragAutoScroll();
+                            }}
+                            onDrag={(e) => {
+                              if (!dragScrollingRef.current.active) return;
+                              if (e.clientX === 0 && e.clientY === 0) return;
+                              dragPointerRef.current = { x: e.clientX, y: e.clientY };
+                            }}
+                            onDragEnd={() => {
+                              setDragOver(null);
+                              stopDragAutoScroll();
                             }}
                             onClick={() => setSelected(c)}
                             role="button"

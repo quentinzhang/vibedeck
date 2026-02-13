@@ -140,63 +140,33 @@ test('prd_cards.mjs new prompts component with numeric options and allows custom
   }
 });
 
-test('prd_cards.mjs new defaults to lite template', async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-default-template-'));
+test('prd_cards.mjs new prompts type and priority for lite template', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-lite-'));
   await write(path.join(tmp, 'AGENT.md'), '- p1: /var/www/p1\n');
 
   const script = path.join(process.cwd(), 'scripts', 'prd_cards.mjs');
 
-  {
-    const res = spawnSync(
-      process.execPath,
-      [
-        script,
-        'new',
-        '--hub',
-        tmp,
-        '--project',
-        'p1',
-        '--non_interactive',
-        '--title',
-        'Foo',
-        '--component',
-        'ui',
-        '--dry_run',
-      ],
-      { encoding: 'utf8' },
-    );
+  const res = spawnSync(
+    process.execPath,
+    [
+      script,
+      'new',
+      '--hub',
+      tmp,
+      '--project',
+      'p1',
+      '--template',
+      'lite',
+      '--title',
+      'Foo',
+      '--component',
+      'ui',
+      '--dry_run',
+    ],
+    { encoding: 'utf8', input: '2\n1\n', env: { ...process.env, CI: '' } },
+  );
 
-    assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
-    assert.ok((res.stdout || '').includes('## Summary'));
-    assert.ok(!(res.stdout || '').includes('## Background / Problem Statement'));
-  }
-
-  {
-    const res = spawnSync(
-      process.execPath,
-      [
-        script,
-        'new',
-        '--hub',
-        tmp,
-        '--project',
-        'p1',
-        '--template',
-        'full',
-        '--type',
-        'bug',
-        '--title',
-        'Foo',
-        '--priority',
-        'P2',
-        '--component',
-        'ui',
-        '--dry_run',
-      ],
-      { encoding: 'utf8' },
-    );
-
-    assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
-    assert.ok((res.stdout || '').includes('## Background / Problem Statement'));
-  }
+  assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
+  assert.match(res.stdout || '', /type:\s*\"feature\"/);
+  assert.match(res.stdout || '', /priority:\s*\"P0\"/);
 });

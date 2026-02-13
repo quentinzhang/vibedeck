@@ -357,14 +357,50 @@ async function listProjectComponents({ hubRoot, projectName } = {}) {
   return Array.from(components).sort((a, b) => a.localeCompare(b));
 }
 
-async function promptChoice({ question, choices, def }) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+function createPromptInterface() {
+  if (process.stdin.isTTY) {
+    return readline.createInterface({ input: process.stdin, output: process.stdout });
+  }
+
+  let cachedLinesPromise = null;
+  let cursor = 0;
+
+  const getLines = async () => {
+    if (!cachedLinesPromise) {
+      cachedLinesPromise = (async () => {
+        const chunks = [];
+        process.stdin.setEncoding('utf8');
+        // eslint-disable-next-line no-restricted-syntax
+        for await (const chunk of process.stdin) {
+          chunks.push(chunk);
+        }
+        return chunks.join('').split(/\r?\n/);
+      })().catch(() => []);
+    }
+    return cachedLinesPromise;
+  };
+
+  return {
+    async question(prompt) {
+      process.stdout.write(String(prompt ?? ''));
+      const lines = await getLines();
+      const line = lines[cursor] ?? '';
+      cursor += 1;
+      return line;
+    },
+    close() {},
+  };
+}
+
+async function promptChoice({ rl, question, choices, def }) {
+  const readlineInterface = rl ?? readline.createInterface({ input: process.stdin, output: process.stdout });
+  const shouldClose = !rl;
   try {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const optionsText = choices.map((c, idx) => `${idx + 1}) ${c.label}`).join('\n');
       const suffix = def ? ` (default: ${def})` : '';
-      const answer = (await rl.question(`${question}${suffix}\n${optionsText}\n> `)).trim();
+      const answer = (await readlineInterface.question(`${question}${suffix}\n${optionsText}\n> `)).trim();
       if (!answer) return def;
 
       const n = Number.parseInt(answer, 10);
@@ -382,18 +418,19 @@ async function promptChoice({ question, choices, def }) {
       console.log(`Invalid selection: ${answer}`);
     }
   } finally {
-    rl.close();
+    if (shouldClose) readlineInterface.close();
   }
 }
 
-async function promptChoiceOrText({ question, choices, def }) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+async function promptChoiceOrText({ rl, question, choices, def }) {
+  const readlineInterface = rl ?? readline.createInterface({ input: process.stdin, output: process.stdout });
+  const shouldClose = !rl;
   try {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const optionsText = choices.map((c, idx) => `${idx + 1}) ${c.label}`).join('\n');
       const suffix = def ? ` (default: ${def})` : '';
-      const answer = (await rl.question(`${question}${suffix}\n${optionsText}\n> `)).trim();
+      const answer = (await readlineInterface.question(`${question}${suffix}\n${optionsText}\n> `)).trim();
       if (!answer) return def;
 
       if (/^[0-9]+$/.test(answer)) {
@@ -415,22 +452,23 @@ async function promptChoiceOrText({ question, choices, def }) {
       return answer;
     }
   } finally {
-    rl.close();
+    if (shouldClose) readlineInterface.close();
   }
 }
 
-async function promptText({ question, def = '' }) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+async function promptText({ rl, question, def = '' }) {
+  const readlineInterface = rl ?? readline.createInterface({ input: process.stdin, output: process.stdout });
+  const shouldClose = !rl;
   try {
     const suffix = def ? ` (${def})` : '';
-    const answer = (await rl.question(`${question}${suffix}: `)).trim();
+    const answer = (await readlineInterface.question(`${question}${suffix}: `)).trim();
     return answer || def;
   } finally {
-    rl.close();
+    if (shouldClose) readlineInterface.close();
   }
 }
 
-async function selectProjectInteractive({ hubRoot, defProject } = {}) {
+async function selectProjectInteractive({ hubRoot, defProject, rl } = {}) {
   const projects = await listProjects(hubRoot);
   if (projects.length === 0) {
     throw new Error('No projects found. Run `project:new` first.');
@@ -438,6 +476,7 @@ async function selectProjectInteractive({ hubRoot, defProject } = {}) {
   const choices = projects.map((p) => ({ value: p, label: p }));
   const def = defProject && projects.includes(defProject) ? defProject : (choices[0]?.value || '');
   const selected = await promptChoice({
+    rl,
     question: 'Select project',
     choices,
     def,
@@ -596,7 +635,7 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
   await copyOrWrite({
     srcPaths: [path.join(assetsRoot, 'AGENT.md'), path.join(legacyAssetsRoot, 'AGENT.md'), path.join(repoRoot, 'AGENT.md')],
     destPath: path.join(hub, 'AGENT.md'),
-    fallbackContent: '# Project → Repo mapping\n\n- example: /var/www/example\n',
+    fallbackContent: '# Project → Repo mapping\n\n- example: ~/example\n',
     force,
   });
   await copyOrWrite({
@@ -697,6 +736,12 @@ async function cmdInit(args) {
 }
 
 async function cmdProjectNew(args) {
+  let rl = null;
+  const getRl = () => {
+    if (!rl) rl = createPromptInterface();
+    return rl;
+  };
+
   const hubRoot = await resolveHubRoot({
     hubArg: args.hub,
     env: process.env,
@@ -704,52 +749,60 @@ async function cmdProjectNew(args) {
     scriptPath: fileURLToPath(import.meta.url),
   });
 
-  await ensureHubLayout({ hubRoot, force: false });
+  try {
+    await ensureHubLayout({ hubRoot, force: false });
 
-  let projectName = validateProjectName(args.project ? String(args.project) : '');
-  if (!projectName) {
-    if (isNonInteractive(args)) throw new Error('Missing --project (non-interactive)');
-    projectName = validateProjectName(await promptText({ question: 'Project name' }));
-  }
-  if (!projectName) throw new Error('Invalid project name');
-
-  await ensureProjectLayout({ hubRoot, projectName });
-
-  const agentPath = path.join(hubRoot, 'AGENT.md');
-  const mappingText = (await fileExists(agentPath)) ? await fs.readFile(agentPath, 'utf8') : '';
-  const projects = parseAgentProjects(mappingText);
-
-  if (projects.has(projectName)) {
-    const existing = String(projects.get(projectName) || '').trim();
-    const next = String(args.repo_path || '').trim();
-    if (next && path.resolve(expandHome(next)) !== path.resolve(expandHome(existing))) {
-      if (isNonInteractive(args)) {
-        throw new Error(`Mapping already exists for ${projectName}: ${existing}`);
-      }
-      // eslint-disable-next-line no-console
-      console.log(`Mapping already exists for ${projectName}: ${existing}`);
+    let projectName = validateProjectName(args.project ? String(args.project) : '');
+    if (!projectName) {
+      if (isNonInteractive(args)) throw new Error('Missing --project (non-interactive)');
+      projectName = validateProjectName(await promptText({ rl: getRl(), question: 'Project name' }));
     }
+    if (!projectName) throw new Error('Invalid project name');
+
+    await ensureProjectLayout({ hubRoot, projectName });
+
+    const agentPath = path.join(hubRoot, 'AGENT.md');
+    const mappingText = (await fileExists(agentPath)) ? await fs.readFile(agentPath, 'utf8') : '';
+    const projects = parseAgentProjects(mappingText);
+
+    if (projects.has(projectName)) {
+      const existing = String(projects.get(projectName) || '').trim();
+      const next = String(args.repo_path || '').trim();
+      if (next && path.resolve(expandHome(next)) !== path.resolve(expandHome(existing))) {
+        if (isNonInteractive(args)) {
+          throw new Error(`Mapping already exists for ${projectName}: ${existing}`);
+        }
+        // eslint-disable-next-line no-console
+        console.log(`Mapping already exists for ${projectName}: ${existing}`);
+      }
+      console.log(`Project ready: ${projectName}`);
+      return;
+    }
+
+    let repoPath = String(args.repo_path || '').trim();
+    if (!repoPath) {
+      if (isNonInteractive(args)) throw new Error('Missing --repo_path (non-interactive)');
+      repoPath = String(
+        await promptText({
+          rl: getRl(),
+          question: 'Repo absolute path for mapping (AGENT.md)',
+          def: `~/${projectName}`,
+        }),
+      ).trim();
+    }
+    if (!looksLikeAbsolutePath(repoPath)) throw new Error('Invalid --repo_path (must be absolute)');
+
+    const existingText = (await fileExists(agentPath)) ? await fs.readFile(agentPath, 'utf8') : '';
+    if (existingText && !existingText.endsWith('\n')) {
+      await fs.appendFile(agentPath, '\n', 'utf8');
+    }
+    const line = `- ${projectName}: ${repoPath}\n`;
+    await fs.appendFile(agentPath, line, 'utf8');
+    console.log(`Added mapping: ${projectName} -> ${repoPath}`);
     console.log(`Project ready: ${projectName}`);
-    return;
+  } finally {
+    rl?.close();
   }
-
-  let repoPath = String(args.repo_path || '').trim();
-  if (!repoPath) {
-    if (isNonInteractive(args)) throw new Error('Missing --repo_path (non-interactive)');
-    repoPath = String(
-      await promptText({ question: 'Repo absolute path for mapping (AGENT.md)', def: `/var/www/${projectName}` }),
-    ).trim();
-  }
-  if (!looksLikeAbsolutePath(repoPath)) throw new Error('Invalid --repo_path (must be absolute)');
-
-  const existingText = (await fileExists(agentPath)) ? await fs.readFile(agentPath, 'utf8') : '';
-  if (existingText && !existingText.endsWith('\n')) {
-    await fs.appendFile(agentPath, '\n', 'utf8');
-  }
-  const line = `- ${projectName}: ${repoPath}\n`;
-  await fs.appendFile(agentPath, line, 'utf8');
-  console.log(`Added mapping: ${projectName} -> ${repoPath}`);
-  console.log(`Project ready: ${projectName}`);
 }
 
 async function cmdProjectList(args) {
@@ -783,6 +836,12 @@ async function cmdProjectList(args) {
 }
 
 async function cmdNew(args) {
+  let rl = null;
+  const getRl = () => {
+    if (!rl) rl = createPromptInterface();
+    return rl;
+  };
+
   const hubRoot = await resolveHubRoot({
     hubArg: args.hub,
     env: process.env,
@@ -790,166 +849,173 @@ async function cmdNew(args) {
     scriptPath: fileURLToPath(import.meta.url),
   });
 
-  await ensureHubLayout({ hubRoot, force: false });
+  try {
+    await ensureHubLayout({ hubRoot, force: false });
 
-  let projectName = validateProjectName(args.project ? String(args.project) : '');
-  if (!projectName) {
-    if (isNonInteractive(args)) {
-      throw new Error('Missing --project (non-interactive)');
-    }
-    let defProject = '';
-    if (args.repo) {
-      try {
-        const repoRoot = await findGitRoot(String(args.repo));
-        defProject = await resolveProjectName({ hubRoot, repoRoot, projectName: '' });
-      } catch {
-        // ignore
+    let projectName = validateProjectName(args.project ? String(args.project) : '');
+    if (!projectName) {
+      if (isNonInteractive(args)) {
+        throw new Error('Missing --project (non-interactive)');
       }
+      let defProject = '';
+      if (args.repo) {
+        try {
+          const repoRoot = await findGitRoot(String(args.repo));
+          defProject = await resolveProjectName({ hubRoot, repoRoot, projectName: '' });
+        } catch {
+          // ignore
+        }
+      }
+      projectName = await selectProjectInteractive({ hubRoot, defProject, rl: getRl() });
     }
-    projectName = await selectProjectInteractive({ hubRoot, defProject });
-  }
 
-  await ensureProjectLayout({ hubRoot, projectName });
+    await ensureProjectLayout({ hubRoot, projectName });
 
   const templateName = String(args.template ?? 'lite').trim();
   const isLiteTemplate = normalizeTemplateName(templateName) === 'lite';
 
-  let type = normalizeType(args.type || '');
-  if (!type && isLiteTemplate) type = 'bug';
-  if (!type) {
-    if (isNonInteractive(args)) throw new Error('Missing/invalid --type. Use bug|feature|improvement.');
-    type = normalizeType(
-      await promptChoice({
-        question: 'Type',
-        choices: [
-          { value: 'bug', label: 'bug' },
-          { value: 'feature', label: 'feature' },
-          { value: 'improvement', label: 'improvement' },
-        ],
-        def: 'bug',
-      }),
-    );
-  }
-  if (!type) throw new Error('Missing/invalid --type. Use bug|feature|improvement.');
-
-  let title = String(args.title || '').trim();
-  if (!title) {
-    if (isNonInteractive(args)) throw new Error('Missing --title.');
-    title = String(await promptText({ question: 'Title' })).trim();
-  }
-  if (!title) throw new Error('Missing --title.');
-
-  let component = String(args.component || '').trim();
-  if (!component) {
-    if (isNonInteractive(args)) throw new Error('Missing --component.');
-    const discovered = await listProjectComponents({ hubRoot, projectName });
-    const merged = [];
-    const seen = new Set();
-    for (const value of ['ui', 'api', ...discovered]) {
-      const c = String(value || '').trim();
-      if (!c || seen.has(c)) continue;
-      seen.add(c);
-      merged.push(c);
-    }
-    component = String(
-      await promptChoiceOrText({
-        question: 'Component (enter # or type custom)',
-        choices: merged.map((c) => ({ value: c, label: c })),
-        def: 'ui',
-      }),
-    ).trim();
-  }
-
-  let priority = normalizePriority(args.priority || '');
-  if (!priority) {
-    if (isLiteTemplate) {
-      priority = '';
-    } else {
-      if (isNonInteractive(args)) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
-      priority = normalizePriority(
+    let type = normalizeType(args.type || '');
+    if (!type && isLiteTemplate && isNonInteractive(args)) type = 'bug';
+    if (!type) {
+      if (isNonInteractive(args)) throw new Error('Missing/invalid --type. Use bug|feature|improvement.');
+      type = normalizeType(
         await promptChoice({
-          question: 'Priority',
+          rl: getRl(),
+          question: 'Type',
           choices: [
-            { value: 'P0', label: 'P0' },
-            { value: 'P1', label: 'P1' },
-            { value: 'P2', label: 'P2' },
-            { value: 'P3', label: 'P3' },
+            { value: 'bug', label: 'bug' },
+            { value: 'feature', label: 'feature' },
+            { value: 'improvement', label: 'improvement' },
           ],
-          def: 'P2',
+          def: 'bug',
         }),
       );
     }
-  }
-  if (!priority && !isLiteTemplate) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
+    if (!type) throw new Error('Missing/invalid --type. Use bug|feature|improvement.');
 
-  let severity = normalizeSeverity(args.severity || '');
-  if (type === 'bug') {
-    if (!severity) severity = 'S2';
-    if (!normalizeSeverity(severity)) throw new Error('Invalid --severity. Use S0|S1|S2|S3.');
-  } else {
-    severity = '';
-  }
+    let title = String(args.title || '').trim();
+    if (!title) {
+      if (isNonInteractive(args)) throw new Error('Missing --title.');
+      title = String(await promptText({ rl: getRl(), question: 'Title' })).trim();
+    }
+    if (!title) throw new Error('Missing --title.');
 
-  const statusRaw = normalizeStatus(args.status || 'drafts');
-  const status = STATUS_DIRS.includes(statusRaw) ? statusRaw : 'drafts';
+    let component = String(args.component || '').trim();
+    if (!component) {
+      if (isNonInteractive(args)) throw new Error('Missing --component.');
+      const discovered = await listProjectComponents({ hubRoot, projectName });
+      const merged = [];
+      const seen = new Set();
+      for (const value of ['ui', 'api', ...discovered]) {
+        const c = String(value || '').trim();
+        if (!c || seen.has(c)) continue;
+        seen.add(c);
+        merged.push(c);
+      }
+      component = String(
+        await promptChoiceOrText({
+          rl: getRl(),
+          question: 'Component (enter # or type custom)',
+          choices: merged.map((c) => ({ value: c, label: c })),
+          def: 'ui',
+        }),
+      ).trim();
+    }
 
-  const prefix = String(args.prefix || typeToPrefix(type)).trim().toUpperCase();
-  const projectRoot = path.join(hubRoot, 'projects', projectName);
-  const id = String(args.id || (await computeNextId(projectRoot, prefix))).trim();
-  if (!/^([A-Z]+)-(\d{4})$/.test(id)) throw new Error('Invalid --id. Example: "BUG-0001".');
+    let priority = normalizePriority(args.priority || '');
+    if (!priority) {
+      if (isLiteTemplate && isNonInteractive(args)) {
+        priority = '';
+      } else {
+        if (isNonInteractive(args) && !isLiteTemplate) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
+        priority = normalizePriority(
+          await promptChoice({
+            rl: getRl(),
+            question: 'Priority',
+            choices: [
+              { value: 'P0', label: 'P0' },
+              { value: 'P1', label: 'P1' },
+              { value: 'P2', label: 'P2' },
+              { value: 'P3', label: 'P3' },
+            ],
+            def: 'P2',
+          }),
+        );
+      }
+    }
+    if (!priority && !isLiteTemplate) throw new Error('Invalid --priority. Use P0|P1|P2|P3.');
 
-  const duplicatePath = await findDuplicateIdPath(projectRoot, id);
-  if (duplicatePath) {
-    const rel = path.relative(hubRoot, duplicatePath).split(path.sep).join('/');
-    throw new Error(`Duplicate id: ${id} (already exists at ${rel})`);
-  }
+    let severity = normalizeSeverity(args.severity || '');
+    if (type === 'bug') {
+      if (!severity) severity = 'S2';
+      if (!normalizeSeverity(severity)) throw new Error('Invalid --severity. Use S0|S1|S2|S3.');
+    } else {
+      severity = '';
+    }
 
-  const slug = String(args.slug || slugify(title)).trim();
-  const fileName = `${id}-${slug}.md`;
-  const outPath = status === 'archived'
-    ? path.join(projectRoot, 'archived', fileName)
-    : path.join(projectRoot, fileName);
+    const statusRaw = normalizeStatus(args.status || 'drafts');
+    const status = STATUS_DIRS.includes(statusRaw) ? statusRaw : 'drafts';
 
-  const owner = String(args.owner || 'codex').trim();
-  const reporter = String(args.reporter || '').trim();
-  const dueAt = args.due_at ? String(args.due_at).trim() : null;
-  const estimate = args.estimate ? String(args.estimate).trim() : '';
-  const labels = parseCsvList(args.labels);
-  const spec = String(args.spec || 'self').trim();
+    const prefix = String(args.prefix || typeToPrefix(type)).trim().toUpperCase();
+    const projectRoot = path.join(hubRoot, 'projects', projectName);
+    const id = String(args.id || (await computeNextId(projectRoot, prefix))).trim();
+    if (!/^([A-Z]+)-(\d{4})$/.test(id)) throw new Error('Invalid --id. Example: "BUG-0001".');
 
-  const today = getToday();
-  const templateText = await pickTemplateByName({ hubRoot, templateName });
-  const content = applyOverridesToTemplate(templateText, {
-    id,
-    title,
-    type,
-    status,
-    priority,
-    severity: type === 'bug' ? severity : null,
-    component,
-    owner,
-    reporter,
-    created_at: today,
-    updated_at: today,
-    due_at: dueAt,
-    spec,
-    labels,
-    estimate,
-  });
+    const duplicatePath = await findDuplicateIdPath(projectRoot, id);
+    if (duplicatePath) {
+      const rel = path.relative(hubRoot, duplicatePath).split(path.sep).join('/');
+      throw new Error(`Duplicate id: ${id} (already exists at ${rel})`);
+    }
 
-  if (args.dry_run === true) {
-    console.log(`[DRY RUN] Would create: ${outPath}`);
-    console.log('---');
-    console.log(content);
-    return;
-  }
+    const slug = String(args.slug || slugify(title)).trim();
+    const fileName = `${id}-${slug}.md`;
+    const outPath = status === 'archived'
+      ? path.join(projectRoot, 'archived', fileName)
+      : path.join(projectRoot, fileName);
 
-  await ensureDir(path.dirname(outPath));
-  await fs.writeFile(outPath, content, { encoding: 'utf8', flag: 'wx' });
-  console.log(`Created: ${outPath}`);
+    const owner = String(args.owner || 'codex').trim();
+    const reporter = String(args.reporter || '').trim();
+    const dueAt = args.due_at ? String(args.due_at).trim() : null;
+    const estimate = args.estimate ? String(args.estimate).trim() : '';
+    const labels = parseCsvList(args.labels);
+    const spec = String(args.spec || 'self').trim();
 
-  if (args.sync === true) {
-    await cmdSync({ hub: hubRoot });
+    const today = getToday();
+    const templateText = await pickTemplateByName({ hubRoot, templateName });
+    const content = applyOverridesToTemplate(templateText, {
+      id,
+      title,
+      type,
+      status,
+      priority,
+      severity: type === 'bug' ? severity : null,
+      component,
+      owner,
+      reporter,
+      created_at: today,
+      updated_at: today,
+      due_at: dueAt,
+      spec,
+      labels,
+      estimate,
+    });
+
+    if (args.dry_run === true) {
+      console.log(`[DRY RUN] Would create: ${outPath}`);
+      console.log('---');
+      console.log(content);
+      return;
+    }
+
+    await ensureDir(path.dirname(outPath));
+    await fs.writeFile(outPath, content, { encoding: 'utf8', flag: 'wx' });
+    console.log(`Created: ${outPath}`);
+
+    if (args.sync === true) {
+      await cmdSync({ hub: hubRoot });
+    }
+  } finally {
+    rl?.close();
   }
 }
 

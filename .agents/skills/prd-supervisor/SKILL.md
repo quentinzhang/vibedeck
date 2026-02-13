@@ -77,6 +77,9 @@ Treat a card as actionable only if it has at least:
 
 Prefer running from hub root (recommended): `cd <hub>`.
 
+Default: when already in hub root, do **not** pass `--hub` (especially for `prd autopilot ...`).
+Use `--hub <path>` only when running outside hub root (for example in cron/systemd or cross-directory invocations).
+
 Use the `prd` CLI (preferred). For full, up-to-date help run: `prd help` (or `prd --help`).
 
 If `prd` is not on PATH, use: `node <hub>/bin/prd.mjs ...`
@@ -86,19 +89,19 @@ Hub resolution order (when `--hub` is omitted):
 - `--hub <path>` (explicit)
 - `$PRD_HUB_ROOT`
 - auto-detect by walking up from CWD
-- default `/var/www/prd`
+- default `~/prd`
 
 | Goal | Command |
 | --- | --- |
-| Sync board | `prd sync --hub .` |
-| New project | `prd project add --hub . --project <name> --repo-path <abs>` |
-| New card | `prd new --hub . --project <name> --type bug|feature|improvement --title "..." --priority P1 --component ui` |
-| Move card | `prd move --hub . --relPath projects/{project}/{status}/{file}.md --to in-progress` |
-| Archive card | `prd archive --hub . --relPath projects/{project}/{status}/{file}.md` |
-| List pending | `prd list pending --hub . --project <name> --json --sync` |
-| Autopilot (dispatch) | `prd autopilot dispatch --hub . --project <name> --max-parallel 2` |
-| Autopilot (reconcile) | `prd autopilot reconcile --hub . --project <name>` |
-| Autopilot (tick) | `prd autopilot tick --hub . --project <name> --max-parallel 2` |
+| Sync board | `prd sync` |
+| New project | `prd project add --project <name> --repo-path <abs>` |
+| New card | `prd new --project <name> --type bug|feature|improvement --title "..." --priority P1 --component ui` |
+| Move card | `prd move --relPath projects/{project}/{status}/{file}.md --to in-progress` |
+| Archive card | `prd archive --relPath projects/{project}/{status}/{file}.md` |
+| List pending | `prd list pending --project <name> --json --sync` |
+| Autopilot (dispatch) | `prd autopilot dispatch --project <name> --max-parallel 2` |
+| Autopilot (reconcile) | `prd autopilot reconcile --project <name>` |
+| Autopilot (tick) | `prd autopilot tick --project <name> --max-parallel 2` |
 
 ### PRD CLI Command List (Terminal)
 
@@ -118,7 +121,7 @@ All commands exposed by the hub `prd` CLI:
 
 Autopilot options (common):
 
-- `--hub <path>` (recommended: `--hub .` when already in hub root)
+- `--hub <path>` (optional override; default is auto-detect from CWD. Prefer omitting when already in hub root)
 - `--project <name>`
 - `--max-parallel <n>` (dispatch/tick)
 - `--dor strict|loose|off` (Definition of Ready gate; default: `loose`)
@@ -133,9 +136,9 @@ Autopilot options (common):
 
 Examples:
 
-- No `tmux` required: `prd autopilot dispatch --hub . --runner process`
-- Custom launcher (shell): `prd autopilot dispatch --hub . --runner command --runner-command "{node_q} {runScript_q} --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
-- OpenClaw coding-agent launcher: `prd autopilot dispatch --hub . --runner command --runner-command "{node_q} {openclawRunScript_q} --openclaw-agent main --openclaw-session-id {sessionName_q} --openclaw-timeout 3600 --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
+- No `tmux` required: `prd autopilot dispatch --runner process`
+- Custom launcher (shell): `prd autopilot dispatch --runner command --runner-command "{node_q} {runScript_q} --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
+- OpenClaw coding-agent launcher: `prd autopilot dispatch --runner command --runner-command "{node_q} {openclawRunScript_q} --openclaw-agent main --openclaw-session-id {sessionName_q} --openclaw-timeout 3600 --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
 
 ## Supervisor ↔ Worker Contract (Stability-Critical)
 
@@ -188,7 +191,7 @@ If DoR fails (based on the selected mode): move the card to `blocked` and log mi
 
 ### 0) Sync (optional but recommended)
 
-Run: `prd sync --hub <hub>`
+Run: `prd sync`
 
 ### 1) Reconcile (non-blocking)
 
@@ -211,7 +214,9 @@ For each card currently in `projects/<project>/in-progress/**`:
    - Else if project result schema is missing for too long: move card to `blocked` (default grace: 6h; configurable via `--infra-grace-hours`)
    - Else: treat as still running; do nothing (do not wait)
 
-3) Move the card using `prd move --hub <hub> --relPath ... --to <status>`.
+3) Move the card using `prd move --relPath ... --to <status>`.
+
+If running outside hub root, add `--hub <abs-hub-path>` explicitly.
 
 Do not attach to tmux or wait; reconciliation is based on files only.
 
@@ -220,7 +225,7 @@ Do not attach to tmux or wait; reconciliation is based on files only.
 Use an absolute `hub` path and a predictable PATH for cron. Example (run every minute):
 
 ```
-* * * * * cd /private/var/www/prd && /usr/bin/env node bin/prd.mjs autopilot reconcile --hub /private/var/www/prd --no-sync >> /tmp/prd-reconcile.log 2>&1
+* * * * * cd "$HOME/prd" && /usr/bin/env node bin/prd.mjs autopilot reconcile --hub "$HOME/prd" --no-sync >> /tmp/prd-reconcile.log 2>&1
 ```
 
 Notes:
@@ -239,7 +244,7 @@ If a worker is “running” for too long (policy-based; do not guess silently):
 
 ### 2) Dispatch (bounded parallelism)
 
-- List `pending` cards (example): `prd list pending --hub <hub> --json --sync`
+- List `pending` cards (example): `prd list pending --json --sync`
 - For each `pending` card:
   - If **not ready** (fails DoR): move to `blocked` and record missing details (short, factual; no “writing AC”).
   - If **ready**:

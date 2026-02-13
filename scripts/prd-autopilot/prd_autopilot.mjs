@@ -358,10 +358,6 @@ function buildWorkerPrompt({
   return [
     `You are a coding agent working on ONE PRD card.`,
     ``,
-    `Required skill:`,
-    `- You MUST use the prd-worker skill for this run.`,
-    `- If you cannot access prd-worker, finish with outcome="blocked" and include a blocker: "prd-worker skill unavailable".`,
-    ``,
     `Card ID: ${cardId}`,
     `Project: ${project}`,
     `Repo: ${repoPath}`,

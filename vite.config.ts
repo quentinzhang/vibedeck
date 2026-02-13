@@ -5,13 +5,30 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { parseAgentProjects } from './scripts/lib/agentMapping.mjs';
 
-export default defineConfig(() => {
+async function resolvePrdHubRoot(repoRoot: string) {
+  const envRoot = String(process.env.PRD_HUB_ROOT || '').trim();
+  if (envRoot) return path.resolve(envRoot);
+
+  try {
+    const raw = await fs.readFile(path.join(repoRoot, 'prd.config.json'), 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const configured = String(parsed.hubRoot || parsed.hub_root || '').trim();
+    if (!configured) return repoRoot;
+    return path.isAbsolute(configured) ? path.resolve(configured) : path.resolve(repoRoot, configured);
+  } catch {
+    return repoRoot;
+  }
+}
+
+export default defineConfig(async () => {
   const allowRemote =
     process.env.PRD_DASHBOARD_ALLOW_REMOTE === 'true' ||
     process.env.PRD_DASHBOARD_ALLOW_REMOTE === '1';
 
+  const prdHubRoot = await resolvePrdHubRoot(path.resolve(__dirname, '.'));
+
   const internalPrdApi = () => {
-    const repoRoot = path.resolve(__dirname, '.');
+    const repoRoot = prdHubRoot;
     const agentPath = path.join(repoRoot, 'AGENT.md');
     let agentCache: { mtimeMs: number; mapping: Map<string, string> } | null = null;
 

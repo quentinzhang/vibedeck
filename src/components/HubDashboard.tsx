@@ -113,7 +113,7 @@ export default function HubDashboard() {
   const [dragOver, setDragOver] = useState<PrdStatus | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
-  const dragScrollingRef = useRef<{ active: boolean; raf: number | null }>({ active: false, raf: null });
+  const dragScrollingRef = useRef<{ active: boolean; timer: number | null }>({ active: false, timer: null });
 
   const [selectedProject, setSelectedProject] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<PrdPriority | 'all'>('all');
@@ -302,60 +302,92 @@ export default function HubDashboard() {
     });
   }, []);
 
-  const stopDragAutoScroll = useCallback(() => {
-    dragScrollingRef.current.active = false;
-    dragPointerRef.current = null;
-    if (dragScrollingRef.current.raf !== null) {
-      window.cancelAnimationFrame(dragScrollingRef.current.raf);
-      dragScrollingRef.current.raf = null;
-    }
-  }, []);
+  const tickDragAutoScroll = useCallback(() => {
+    const pointer = dragPointerRef.current;
+    if (!pointer) return;
 
-  const startDragAutoScroll = useCallback(() => {
-    if (dragScrollingRef.current.raf !== null) return;
-    dragScrollingRef.current.active = true;
+    const viewport = scrollViewportRef.current;
+    const hasViewport = Boolean(viewport);
+    const canScrollViewport = Boolean(viewport && viewport.scrollWidth > viewport.clientWidth + 1);
+
+    const scrollTarget = canScrollViewport
+      ? viewport
+      : (document.scrollingElement as HTMLElement | null);
+
+    if (!scrollTarget) return;
 
     const EDGE_PX = 80;
     const MAX_SPEED_PX = 18;
 
-    const tick = () => {
-      if (!dragScrollingRef.current.active) {
-        dragScrollingRef.current.raf = null;
-        return;
-      }
+    const rect = canScrollViewport
+      ? (viewport as HTMLDivElement).getBoundingClientRect()
+      : { left: 0, right: window.innerWidth, top: 0, bottom: window.innerHeight };
 
-      const viewport = scrollViewportRef.current;
-      const pointer = dragPointerRef.current;
-      if (viewport && pointer) {
-        const rect = viewport.getBoundingClientRect();
-        if (pointer.y >= rect.top && pointer.y <= rect.bottom) {
-          const distLeft = pointer.x - rect.left;
-          const distRight = rect.right - pointer.x;
-          let delta = 0;
+    if (hasViewport && viewport) {
+      const toleranceY = EDGE_PX;
+      if (pointer.y < rect.top - toleranceY || pointer.y > rect.bottom + toleranceY) return;
+    }
 
-          if (distLeft >= 0 && distLeft < EDGE_PX) {
-            const intensity = Math.min(1, (EDGE_PX - distLeft) / EDGE_PX);
-            delta = -Math.round(1 + intensity * (MAX_SPEED_PX - 1));
-          } else if (distRight >= 0 && distRight < EDGE_PX) {
-            const intensity = Math.min(1, (EDGE_PX - distRight) / EDGE_PX);
-            delta = Math.round(1 + intensity * (MAX_SPEED_PX - 1));
-          }
+    const x = Math.min(rect.right, Math.max(rect.left, pointer.x));
+    const distLeft = x - rect.left;
+    const distRight = rect.right - x;
+    let delta = 0;
 
-          if (delta !== 0) {
-            const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-            const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, viewport.scrollLeft + delta));
-            if (nextScrollLeft !== viewport.scrollLeft) viewport.scrollLeft = nextScrollLeft;
-          }
-        }
-      }
+    if (distLeft >= 0 && distLeft < EDGE_PX) {
+      const intensity = Math.min(1, (EDGE_PX - distLeft) / EDGE_PX);
+      delta = -Math.round(1 + intensity * (MAX_SPEED_PX - 1));
+    } else if (distRight >= 0 && distRight < EDGE_PX) {
+      const intensity = Math.min(1, (EDGE_PX - distRight) / EDGE_PX);
+      delta = Math.round(1 + intensity * (MAX_SPEED_PX - 1));
+    }
 
-      dragScrollingRef.current.raf = window.requestAnimationFrame(tick);
-    };
+    if (delta === 0) return;
 
-    dragScrollingRef.current.raf = window.requestAnimationFrame(tick);
+    const maxScrollLeft = Math.max(0, scrollTarget.scrollWidth - scrollTarget.clientWidth);
+    const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, scrollTarget.scrollLeft + delta));
+    if (nextScrollLeft !== scrollTarget.scrollLeft) scrollTarget.scrollLeft = nextScrollLeft;
   }, []);
 
+  const stopDragAutoScroll = useCallback(() => {
+    dragScrollingRef.current.active = false;
+    dragPointerRef.current = null;
+    if (dragScrollingRef.current.timer !== null) {
+      window.clearInterval(dragScrollingRef.current.timer);
+      dragScrollingRef.current.timer = null;
+    }
+  }, []);
+
+  const startDragAutoScroll = useCallback(() => {
+    if (dragScrollingRef.current.timer !== null) return;
+    dragScrollingRef.current.active = true;
+    tickDragAutoScroll();
+    dragScrollingRef.current.timer = window.setInterval(() => {
+      if (!dragScrollingRef.current.active) return;
+      tickDragAutoScroll();
+    }, 16);
+  }, [tickDragAutoScroll]);
+
   useEffect(() => stopDragAutoScroll, [stopDragAutoScroll]);
+
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      if (!dragScrollingRef.current.active) return;
+      if (event.clientX === 0 && event.clientY === 0) return;
+      dragPointerRef.current = { x: event.clientX, y: event.clientY };
+      tickDragAutoScroll();
+    };
+
+    const onStop = () => stopDragAutoScroll();
+
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onStop);
+    window.addEventListener('dragend', onStop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onStop);
+      window.removeEventListener('dragend', onStop);
+    };
+  }, [stopDragAutoScroll, tickDragAutoScroll]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -508,7 +540,9 @@ export default function HubDashboard() {
           className="mt-6 overflow-x-auto pb-2"
           onDragOverCapture={(e) => {
             if (!dragScrollingRef.current.active) return;
+            if (e.clientX === 0 && e.clientY === 0) return;
             dragPointerRef.current = { x: e.clientX, y: e.clientY };
+            tickDragAutoScroll();
           }}
           onDrop={() => {
             stopDragAutoScroll();
@@ -530,8 +564,10 @@ export default function HubDashboard() {
                   }`}
                   onDragOver={(e) => {
                     e.preventDefault();
+                    if (e.clientX === 0 && e.clientY === 0) return;
                     dragPointerRef.current = { x: e.clientX, y: e.clientY };
                     setDragOver(status);
+                    tickDragAutoScroll();
                   }}
                   onDragLeave={() => {
                     setDragOver((current) => (current === status ? null : current));
@@ -577,6 +613,7 @@ export default function HubDashboard() {
                               if (!dragScrollingRef.current.active) return;
                               if (e.clientX === 0 && e.clientY === 0) return;
                               dragPointerRef.current = { x: e.clientX, y: e.clientY };
+                              tickDragAutoScroll();
                             }}
                             onDragEnd={() => {
                               setDragOver(null);

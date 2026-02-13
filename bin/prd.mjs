@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import { buildHubStatus } from '../scripts/lib/sync.mjs';
 
@@ -87,12 +88,36 @@ async function findHubRootFromCwd(cwd) {
   }
 }
 
+function repoRootFromScript() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+async function readHubRootFromPrdConfig({ repoRoot }) {
+  const configPath = path.join(repoRoot, 'prd.config.json');
+  if (!(await pathExists(configPath))) return '';
+
+  try {
+    const raw = await fs.readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return '';
+    const value = String(parsed.hubRoot || parsed.hub_root || '').trim();
+    if (!value) return '';
+    return path.isAbsolute(value) ? path.resolve(value) : path.resolve(repoRoot, value);
+  } catch {
+    return '';
+  }
+}
+
 async function resolveHubRoot(args) {
   if (args.hub) return path.resolve(String(args.hub));
   if (process.env.PRD_HUB_ROOT) return path.resolve(String(process.env.PRD_HUB_ROOT));
   const inferred = await findHubRootFromCwd(process.cwd());
   if (inferred) return inferred;
-  return '/var/www/prd';
+
+  const repoRoot = repoRootFromScript();
+  const configured = await readHubRootFromPrdConfig({ repoRoot });
+  if (configured) return configured;
+  return repoRoot;
 }
 
 function toNonInteractiveArgs(args) {

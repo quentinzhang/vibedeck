@@ -24,6 +24,7 @@ export default function CardPreviewDrawer({
   loading,
   error,
   onOpenInEditor,
+  onArchive,
   onClose,
 }: {
   card: HubCard | null;
@@ -31,6 +32,7 @@ export default function CardPreviewDrawer({
   loading: boolean;
   error: string | null;
   onOpenInEditor: () => void;
+  onArchive: () => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<'card' | 'logs'>('card');
@@ -105,6 +107,19 @@ export default function CardPreviewDrawer({
               <div className="mt-2 truncate font-mono text-[11px] text-zinc-500">{card.relPath}</div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {card.status !== 'archived' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ok = window.confirm(`Archive ${card.id}?`);
+                    if (!ok) return;
+                    onArchive();
+                  }}
+                  className="rounded border border-rose-900/50 bg-rose-950/30 px-3 py-1.5 text-xs text-rose-200 hover:bg-rose-950/50"
+                >
+                  Archive
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={onOpenInEditor}

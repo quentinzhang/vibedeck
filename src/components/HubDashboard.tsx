@@ -556,6 +556,10 @@ export default function HubDashboard() {
           if (!selected) return;
           void openByRelPath(selected.relPath);
         }}
+        onArchive={() => {
+          if (!selected) return;
+          void moveByRelPath(selected.relPath, 'archived');
+        }}
         onClose={() => setSelected(null)}
       />
     </div>

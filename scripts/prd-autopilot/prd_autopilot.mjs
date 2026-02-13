@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { execFileSync, spawn } from 'node:child_process';
@@ -86,6 +87,84 @@ function tryRun(cmd, argv, options = {}) {
   } catch (err) {
     const stderr = err?.stderr ? String(err.stderr) : '';
     return { ok: false, out: '', stderr };
+  }
+}
+
+function isExecutableFile(filePath) {
+  try {
+    fsSync.accessSync(filePath, fsSync.constants.X_OK);
+    return fsSync.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolveExecutableOnPath(name, dirs) {
+  const seen = new Set();
+  for (const rawDir of dirs) {
+    const dir = String(rawDir || '').trim();
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    const candidate = path.join(dir, name);
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return '';
+}
+
+const COMMON_BIN_DIRS = /** @type {const} */ ([
+  '/opt/homebrew/bin',
+  '/opt/homebrew/sbin',
+  '/usr/local/bin',
+  '/usr/local/sbin',
+  '/usr/bin',
+  '/bin',
+  '/usr/sbin',
+  '/sbin',
+]);
+
+let cachedTmuxBin = null;
+
+function buildTmuxNotFoundError() {
+  const lines = [
+    'tmux not found (required for --runner=tmux).',
+    'Fix: install tmux (e.g. `brew install tmux`) or set `PRD_TMUX_BIN=/absolute/path/to/tmux`.',
+    `PATH=${process.env.PATH || ''}`,
+  ];
+  return lines.join('\n');
+}
+
+function getTmuxBin({ required = false } = {}) {
+  if (cachedTmuxBin !== null) {
+    if (required && !cachedTmuxBin) throw new Error(buildTmuxNotFoundError());
+    return cachedTmuxBin;
+  }
+
+  const override = String(process.env.PRD_TMUX_BIN || process.env.TMUX_BIN || '').trim();
+  if (override) {
+    if (override.includes('/') || override.includes(path.sep)) {
+      cachedTmuxBin = isExecutableFile(override) ? override : '';
+    } else {
+      const envDirs = String(process.env.PATH || '').split(path.delimiter);
+      cachedTmuxBin = resolveExecutableOnPath(override, [...COMMON_BIN_DIRS, ...envDirs]);
+    }
+    if (required && !cachedTmuxBin) throw new Error(buildTmuxNotFoundError());
+    return cachedTmuxBin;
+  }
+
+  const envDirs = String(process.env.PATH || '').split(path.delimiter);
+  cachedTmuxBin = resolveExecutableOnPath('tmux', [...COMMON_BIN_DIRS, ...envDirs]);
+  if (required && !cachedTmuxBin) throw new Error(buildTmuxNotFoundError());
+  return cachedTmuxBin;
+}
+
+function normalizeFsPath(p) {
+  const raw = String(p || '');
+  if (!raw) return '';
+  try {
+    const fn = fsSync.realpathSync?.native || fsSync.realpathSync;
+    return fn(raw);
+  } catch {
+    return path.resolve(raw);
   }
 }
 
@@ -239,8 +318,20 @@ function buildAutopilotBlockedNote({ title, blockers }) {
   return lines.join('\n');
 }
 
-function buildWorkerPrompt({ hubRoot, project, repoPath, worktreePath, cardId, cardText }) {
+function buildWorkerPrompt({
+  hubRoot,
+  project,
+  repoPath,
+  worktreePath,
+  cardId,
+  cardText,
+  resultPath,
+  schemaPath,
+  logPath,
+  codexInvoke,
+}) {
   const today = getToday();
+  const invoke = String(codexInvoke || 'exec').trim();
   return [
     `You are a coding agent working on ONE PRD card.`,
     ``,
@@ -252,15 +343,31 @@ function buildWorkerPrompt({ hubRoot, project, repoPath, worktreePath, cardId, c
     `Project: ${project}`,
     `Repo: ${repoPath}`,
     `Worktree: ${worktreePath}`,
+    `Codex invoke: ${invoke}`,
+    ...(schemaPath ? [`Result schema: ${schemaPath}`] : []),
+    ...(resultPath ? [`Result JSON path: ${resultPath}`] : []),
+    ...(logPath ? [`Worker log path: ${logPath}`] : []),
     `Date: ${today}`,
     `Started at: ${new Date().toISOString()}`,
     ``,
     `Hard constraints:`,
     `- Do NOT edit the PRD hub at ${hubRoot}. Treat it as read-only.`,
     `- Work ONLY inside the repo worktree at: ${worktreePath}`,
+    `- Immediately before the FINAL JSON, output a short natural-language summary message (not JSON).`,
     `- You MUST finish by emitting a FINAL JSON response matching the required output schema.`,
+    `- Your FINAL message must be ONLY the JSON object (no prose before/after).`,
+    `- Include the same human-readable summary inside the FINAL JSON "notes" field so it is captured in logs/artifacts.`,
     `  - outcome: "in-review" if you implemented + validated the change.`,
     `  - outcome: "blocked" if you cannot proceed (missing info, cannot run validation, unclear AC, etc.).`,
+    ...(invoke === 'prompt'
+      ? [
+          ``,
+          `IMPORTANT (prompt/TUI mode): Codex cannot auto-save your last message.`,
+          `- You MUST ALSO write the same FINAL JSON object to the file path in "Result JSON path".`,
+          `- Write ONLY the JSON object to that file (do not include the human-readable summary).`,
+          `- You may use PRD_AUTOPILOT_RESULT_PATH / PRD_AUTOPILOT_SCHEMA_PATH env vars if available.`,
+        ]
+      : []),
     ``,
     `PRD card content:`,
     `---`,
@@ -269,6 +376,7 @@ function buildWorkerPrompt({ hubRoot, project, repoPath, worktreePath, cardId, c
     ``,
     `Now begin.`,
     ``,
+    `Reminder: Immediately before the FINAL JSON, output a short natural-language summary message.`,
     `Reminder: Your FINAL message must be a single JSON object matching the schema.`,
   ].join('\n');
 }
@@ -284,17 +392,17 @@ function detectBaseBranch(repoPath) {
 function worktreeExists(repoPath, worktreePath) {
   const res = tryRun('git', ['-C', repoPath, 'worktree', 'list', '--porcelain']);
   if (!res.ok) return false;
-  const target = path.resolve(String(worktreePath));
+  const target = normalizeFsPath(worktreePath);
   const entries = parseGitWorktreeListPorcelain(res.out);
-  return entries.some((e) => path.resolve(e.path) === target);
+  return entries.some((e) => normalizeFsPath(e.path) === target);
 }
 
 function getWorktreeBranch(repoPath, worktreePath) {
   const res = tryRun('git', ['-C', repoPath, 'worktree', 'list', '--porcelain']);
   if (!res.ok) return '';
-  const target = path.resolve(String(worktreePath));
+  const target = normalizeFsPath(worktreePath);
   const entries = parseGitWorktreeListPorcelain(res.out);
-  const found = entries.find((e) => path.resolve(e.path) === target);
+  const found = entries.find((e) => normalizeFsPath(e.path) === target);
   return found?.branch || '';
 }
 
@@ -323,12 +431,15 @@ function ensureWorktree({ repoPath, project, cardId, worktreeBaseDir, baseBranch
 }
 
 function tmuxHasSession(name) {
-  return tryRun('tmux', ['has-session', '-t', name]).ok;
+  const tmuxBin = getTmuxBin();
+  if (!tmuxBin) return false;
+  return tryRun(tmuxBin, ['has-session', '-t', `=${name}`]).ok;
 }
 
 function tmuxNewSessionDetached({ sessionName, cwd, command, dryRun }) {
   if (dryRun) return;
-  run('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd, command]);
+  const tmuxBin = getTmuxBin({ required: true });
+  run(tmuxBin, ['new-session', '-d', '-s', sessionName, '-c', cwd, command]);
 }
 
 function normalizeRunner(raw) {
@@ -337,6 +448,13 @@ function normalizeRunner(raw) {
   if (v === 'process' || v === 'proc' || v === 'background') return 'process';
   if (v === 'command' || v === 'cmd' || v === 'shell') return 'command';
   throw new Error(`Invalid --runner: ${raw} (expected: tmux|process|command)`);
+}
+
+function normalizeCodexInvoke(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (!v || v === 'exec') return 'exec';
+  if (v === 'prompt' || v === 'tui' || v === 'interactive') return 'prompt';
+  throw new Error(`Invalid --codex-invoke: ${raw} (expected: exec|prompt)`);
 }
 
 function pidInfoPath({ worktreePath, runKey }) {
@@ -512,6 +630,7 @@ async function dispatchOnce({
   dryRun,
   tmuxPrefix,
   codexCmd,
+  codexInvoke,
   codexMode,
   codexModel,
   baseBranch,
@@ -578,6 +697,24 @@ async function dispatchOnce({
     const sessionName = computeSessionName(tmuxPrefix, project, cardId);
     if (tmuxHasSession(sessionName)) {
       console.warn(`[WARN] tmux session already exists: ${sessionName} (skipping dispatch for ${cardId})`);
+      continue;
+    }
+
+    if (codexInvoke === 'prompt' && normalizeRunner(runner) === 'process') {
+      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
+      if (moved?.destAbs) {
+        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
+        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
+        await appendAutopilotNote(
+          targetAbs,
+          buildAutopilotBlockedNote({
+            title: 'Unsupported runner for codex-invoke=prompt',
+            blockers: ['runner=process does not provide a TTY; use --runner=tmux (recommended) or --runner=command'],
+          }),
+          { dryRun },
+        );
+        changed = true;
+      }
       continue;
     }
 
@@ -649,6 +786,10 @@ async function dispatchOnce({
       worktreePath,
       cardId,
       cardText,
+      resultPath: resultAbs,
+      schemaPath: schemaAbs,
+      logPath: logAbs,
+      codexInvoke,
     });
 
     if (!dryRun) {
@@ -663,6 +804,8 @@ async function dispatchOnce({
 	    await updateCardStatusFrontmatter(dryRun ? moved.srcAbs : moved.destAbs, { status: 'in-progress', dryRun });
 
     const runnerArgs = [
+      '--invoke',
+      codexInvoke,
       '--mode',
       codexMode,
       '--codex',
@@ -690,6 +833,7 @@ async function dispatchOnce({
       logAbs,
       pidAbs,
       codexCmd,
+      codexInvoke,
       codexMode,
       codexModel,
       runScript,
@@ -703,6 +847,7 @@ async function dispatchOnce({
       logAbs_q: shellQuote(logAbs),
       pidAbs_q: shellQuote(pidAbs),
       codexCmd_q: shellQuote(codexCmd),
+      codexInvoke_q: shellQuote(codexInvoke),
       codexMode_q: shellQuote(codexMode),
       codexModel_q: shellQuote(codexModel),
       runScript_q: shellQuote(runScript),
@@ -908,7 +1053,8 @@ async function reconcileOnce({
 
     if (sessionName && tmuxHasSession(sessionName)) {
       const doneName = sanitizeKey(`${sessionName}__${toStatus}`);
-      if (!dryRun) tryRun('tmux', ['rename-session', '-t', sessionName, doneName]);
+      const tmuxBin = getTmuxBin();
+      if (!dryRun && tmuxBin) tryRun(tmuxBin, ['rename-session', '-t', `=${sessionName}`, doneName]);
     }
 
     changed = true;
@@ -937,10 +1083,11 @@ Options:
   --max-parallel <n>           Max concurrent running cards (default: 2)
   --dor strict|loose|off       Definition of Ready gate (default: loose)
   --runner tmux|process|command Worker launcher (default: tmux)
-  --runner-command <template>  Shell template when --runner=command (supports {node_q},{runScript_q},{openclawRunScript_q},{worktreePath_q},{promptAbs_q},{schemaAbs_q},{resultAbs_q},{logAbs_q},{pidAbs_q},{sessionName_q},{codexCmd_q},{codexMode_q},{codexModel_q})
+  --runner-command <template>  Shell template when --runner=command (supports {node_q},{runScript_q},{openclawRunScript_q},{worktreePath_q},{promptAbs_q},{schemaAbs_q},{resultAbs_q},{logAbs_q},{pidAbs_q},{sessionName_q},{codexCmd_q},{codexInvoke_q},{codexMode_q},{codexModel_q})
   --tmux-prefix <prefix>       tmux session name prefix (default: prd)
   --worktree-dir <path>        Worktree base dir inside repo (default: .worktrees)
   --codex <path>               codex CLI path (default: codex)
+  --codex-invoke exec|prompt   How to run Codex (default: exec). prompt launches the interactive TUI and may not exit automatically.
   --codex-mode danger|full-auto  codex exec automation mode (default: danger)
   --model <id>                 codex model (optional)
   --base <branch>              Worktree base branch (default: detect main/master/HEAD)
@@ -968,6 +1115,7 @@ async function main() {
   const dryRun = args['dry-run'] === true;
   const tmuxPrefix = String(args['tmux-prefix'] || 'prd').trim();
   const codexCmd = String(args.codex || 'codex').trim();
+  const codexInvoke = normalizeCodexInvoke(args['codex-invoke'] || 'exec');
   const codexMode = String(args['codex-mode'] || 'danger').trim();
   const codexModel = args.model ? String(args.model).trim() : '';
   const baseBranch = args.base ? String(args.base).trim() : '';
@@ -1000,6 +1148,7 @@ async function main() {
 	      dryRun,
 	      tmuxPrefix,
 	      codexCmd,
+	      codexInvoke,
 	      codexMode,
 	      codexModel,
 	      baseBranch,
@@ -1021,6 +1170,7 @@ async function main() {
 	      dryRun,
 	      tmuxPrefix,
 	      codexCmd,
+	      codexInvoke,
 	      codexMode,
 	      codexModel,
 	      baseBranch,

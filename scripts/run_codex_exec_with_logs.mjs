@@ -41,6 +41,98 @@ function toBool(v) {
   return s === '1' || s === 'true' || s === 'yes' || s === 'y';
 }
 
+function normalizeInvoke(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (!v || v === 'exec') return 'exec';
+  if (v === 'prompt' || v === 'tui' || v === 'interactive') return 'prompt';
+  throw new Error(`Invalid --invoke: ${raw} (expected: exec|prompt)`);
+}
+
+function blockedResult(summary, blockers = []) {
+  return {
+    outcome: 'blocked',
+    summary: String(summary || 'Blocked').trim() || 'Blocked',
+    blockers: Array.isArray(blockers) ? blockers.map((b) => String(b).trim()).filter(Boolean) : [],
+    validation: [],
+    files_changed: [],
+    commit: { created: false, message: '' },
+    notes: '',
+  };
+}
+
+function formatWorkerResultSummary(result) {
+  if (!result || typeof result !== 'object') return '';
+
+  const outcome = typeof result.outcome === 'string' ? result.outcome : '';
+  const summary = typeof result.summary === 'string' ? result.summary : '';
+  const blockers = Array.isArray(result.blockers) ? result.blockers.filter((b) => typeof b === 'string' && b.trim()) : [];
+  const validation = Array.isArray(result.validation) ? result.validation.filter((v) => v && typeof v === 'object') : [];
+  const filesChanged = Array.isArray(result.files_changed)
+    ? result.files_changed.filter((f) => typeof f === 'string' && f.trim())
+    : [];
+  const commitCreated = result.commit && typeof result.commit === 'object' && result.commit.created === true;
+  const commitMessage = result.commit && typeof result.commit === 'object' && typeof result.commit.message === 'string'
+    ? result.commit.message.trim()
+    : '';
+  const notes = typeof result.notes === 'string' ? result.notes.trim() : '';
+
+  const lines = [];
+  lines.push('--- worker result summary ---');
+  if (outcome) lines.push(`outcome: ${outcome}`);
+  if (summary) lines.push(`summary: ${summary}`);
+
+  if (blockers.length) {
+    lines.push('blockers:');
+    for (const b of blockers) lines.push(`- ${b}`);
+  }
+
+  if (validation.length) {
+    lines.push('validation:');
+    for (const v of validation) {
+      const ok = v.ok === true ? 'ok' : v.ok === false ? 'fail' : 'unknown';
+      const cmd = typeof v.command === 'string' ? v.command.trim() : '';
+      const vNotes = typeof v.notes === 'string' ? v.notes.trim() : '';
+      const tail = vNotes ? ` — ${vNotes}` : '';
+      lines.push(`- [${ok}] ${cmd || '(no command)'}${tail}`);
+    }
+  }
+
+  if (filesChanged.length) {
+    lines.push('files_changed:');
+    for (const f of filesChanged) lines.push(`- ${f}`);
+  }
+
+  if (commitCreated) lines.push(`commit: ${commitMessage || '(created=true)'}`);
+
+  if (notes) {
+    lines.push('notes:');
+    lines.push(notes);
+  }
+
+  lines.push('--- end worker result summary ---');
+  return `${lines.join('\n')}\n`;
+}
+
+async function appendWorkerResultSummaryToLogs({ outPath, logStream }) {
+  if (!outPath) return;
+  const raw = await fsp.readFile(outPath, 'utf8').catch(() => '');
+  if (!raw) return;
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+
+  const summaryText = formatWorkerResultSummary(parsed);
+  if (!summaryText) return;
+
+  const decorated = `\n${summaryText}`;
+  process.stdout.write(decorated);
+  logStream.write(decorated);
+}
+
 function parseDotenv(text) {
   const env = {};
   const lines = String(text || '').split(/\r?\n/);
@@ -98,6 +190,7 @@ async function main() {
   const schemaPath = String(args.schema || '').trim();
   const outPath = String(args.output || '').trim();
   const logPath = args.log ? String(args.log).trim() : `${outPath}.log`;
+  const invoke = normalizeInvoke(args.invoke || 'exec');
   const mode = String(args.mode || 'danger').trim();
   const model = args.model ? String(args.model).trim() : '';
   const envFile = args['env-file'] ? String(args['env-file']).trim() : '';
@@ -113,38 +206,105 @@ async function main() {
 
   const promptText = await fsp.readFile(promptPath, 'utf8');
 
-  const codexArgs = ['exec'];
-  if (mode === 'danger') codexArgs.push('--dangerously-bypass-approvals-and-sandbox');
-  else if (mode === 'full-auto') codexArgs.push('--full-auto');
+  const commonArgs = [];
+  if (mode === 'danger') commonArgs.push('--dangerously-bypass-approvals-and-sandbox');
+  else if (mode === 'full-auto') commonArgs.push('--full-auto');
   else if (mode !== 'none') throw new Error(`Invalid --mode: ${mode} (expected danger|full-auto|none)`);
-
-  if (model) codexArgs.push('-m', model);
-  if (toBool(args['skip-git-repo-check'])) codexArgs.push('--skip-git-repo-check');
-  codexArgs.push('-C', workdir, '--output-schema', schemaPath, '--output-last-message', outPath, '-');
 
   const openclawEnv = await loadOpenclawEnv({ envFile });
 
+  const baseEnv = {
+    ...process.env,
+    PRD_AUTOPILOT_RESULT_PATH: outPath,
+    PRD_AUTOPILOT_SCHEMA_PATH: schemaPath,
+    PRD_AUTOPILOT_LOG_PATH: logPath,
+    PRD_AUTOPILOT_WORKDIR: workdir,
+  };
+
   await new Promise((resolve) => {
     const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-    logStream.write(`\n# codex exec started_at=${new Date().toISOString()}\n`);
-    logStream.write(`# cmd: ${codexCmd} ${codexArgs.join(' ')}\n`);
+    logStream.write(`\n# codex invoke=${invoke} started_at=${new Date().toISOString()}\n`);
     logStream.write(`# env: ${openclawEnv.loaded ? 'loaded' : 'missing'} ${openclawEnv.path}\n`);
 
-    const child = spawn(codexCmd, codexArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
-    child.stdout.on('data', (chunk) => {
-      process.stdout.write(chunk);
-      logStream.write(chunk);
-    });
-    child.stderr.on('data', (chunk) => {
-      process.stderr.write(chunk);
-      logStream.write(chunk);
-    });
-    child.stdin.write(promptText);
-    child.stdin.end();
+    if (invoke === 'exec') {
+      const codexArgs = ['exec', ...commonArgs];
+      if (model) codexArgs.push('-m', model);
+      if (toBool(args['skip-git-repo-check'])) codexArgs.push('--skip-git-repo-check');
+      codexArgs.push('-C', workdir, '--output-schema', schemaPath, '--output-last-message', outPath, '-');
 
+      logStream.write(`# cmd: ${codexCmd} ${codexArgs.join(' ')}\n`);
+
+      const child = spawn(codexCmd, codexArgs, { stdio: ['pipe', 'pipe', 'pipe'], env: baseEnv });
+      child.stdout.on('data', (chunk) => {
+        process.stdout.write(chunk);
+        logStream.write(chunk);
+      });
+      child.stderr.on('data', (chunk) => {
+        process.stderr.write(chunk);
+        logStream.write(chunk);
+      });
+      child.stdin.write(promptText);
+      child.stdin.end();
+
+      child.on('exit', async (code) => {
+        const n = Number.isFinite(code) ? code : 1;
+        await appendWorkerResultSummaryToLogs({ outPath, logStream }).catch(() => {});
+        logStream.write(`\n# codex exec exited_at=${new Date().toISOString()} code=${n}\n`);
+        logStream.end();
+        await fsp.writeFile(exitPath, `${n}\n`, 'utf8').catch(() => {});
+        resolve();
+      });
+      return;
+    }
+
+    const codexArgs = [...commonArgs];
+    if (model) codexArgs.push('-m', model);
+    codexArgs.push('-C', workdir, promptText);
+    logStream.write(
+      `# cmd: ${codexCmd} ${[...commonArgs, ...(model ? ['-m', model] : []), '-C', workdir].join(' ')} <PROMPT:${promptPath} bytes=${Buffer.byteLength(promptText, 'utf8')}>\n`,
+    );
+    logStream.write(`# NOTE: interactive prompt mode may not exit automatically; attach via tmux if needed.\n`);
+
+    const child = spawn(codexCmd, codexArgs, { stdio: 'inherit', env: baseEnv, cwd: workdir });
     child.on('exit', async (code) => {
       const n = Number.isFinite(code) ? code : 1;
-      logStream.write(`\n# codex exec exited_at=${new Date().toISOString()} code=${n}\n`);
+
+      // In prompt/TUI mode Codex cannot write --output-last-message, so require the agent to write output JSON itself.
+      const raw = await fsp.readFile(outPath, 'utf8').catch(() => '');
+      if (!raw) {
+        await fsp.writeFile(
+          outPath,
+          `${JSON.stringify(
+            blockedResult('Missing worker result JSON (codex-invoke=prompt)', [
+              `Expected JSON file at: ${outPath}`,
+              'In prompt/TUI mode, the worker must write the final JSON result to PRD_AUTOPILOT_RESULT_PATH.',
+            ]),
+            null,
+            2,
+          )}\n`,
+          'utf8',
+        ).catch(() => {});
+      } else {
+        try {
+          JSON.parse(raw);
+        } catch {
+          await fsp.writeFile(
+            outPath,
+            `${JSON.stringify(
+              blockedResult('Invalid worker result JSON (codex-invoke=prompt)', [
+                `Result file exists but is not valid JSON: ${outPath}`,
+                'In prompt/TUI mode, ensure the worker writes a single JSON object.',
+              ]),
+              null,
+              2,
+            )}\n`,
+            'utf8',
+          ).catch(() => {});
+        }
+      }
+
+      await appendWorkerResultSummaryToLogs({ outPath, logStream }).catch(() => {});
+      logStream.write(`\n# codex prompt exited_at=${new Date().toISOString()} code=${n}\n`);
       logStream.end();
       await fsp.writeFile(exitPath, `${n}\n`, 'utf8').catch(() => {});
       resolve();

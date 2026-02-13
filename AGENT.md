@@ -68,3 +68,4 @@ If you are not running autopilot, follow this routine:
 - ConsoleX_backend: /var/www/evals_api
 - prd: /var/www/prd
 - toolsets: /var/www/MCPList/backend
+- test: /var/www/prdtest

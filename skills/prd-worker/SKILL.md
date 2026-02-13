@@ -58,7 +58,20 @@ Suggested format (one line per event):
 
 `[prd-worker] {"phase":"analyze|implement|test|finalize","message":"...","files":["..."],"commands":["..."]}`
 
+## Pre-Final Summary (Human-Readable)
+
+Immediately before emitting your FINAL JSON, output a short natural-language summary message (not JSON). This is for humans skimming logs and is not schema-validated.
+
+Include (keep it concise):
+- Your interpretation of the card + key decisions/rationale
+- What you changed (major files/behavior)
+- What validation you ran and the outcome
+- Any remaining risks, TODOs, or follow-ups
+
+Also include the same summary inside the FINAL JSON `notes` field so it is captured in result artifacts (some runners only persist the final JSON).
+
 ## Final Output (Must Be Last Message)
 
 Your FINAL message must be a single JSON object that matches the fixed schema:
 - No markdown, no backticks, no extra prose before/after the JSON.
+- The human-readable summary must be a separate message immediately before the FINAL JSON.

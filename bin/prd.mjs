@@ -18,7 +18,7 @@ Usage:
   prd move [--hub <path>] --relPath projects/<project>/<file>.md --to <status> [--no-sync]
   prd archive [--hub <path>] --relPath projects/<project>/<file>.md [--no-sync]
   prd list pending [--hub <path>] [--project <name>] [--json] [--sync]
-  prd autopilot <dispatch|reconcile|tick> [--hub <path>] [--project <name>] [--max-parallel <n>] [--runner tmux|process|command] [--runner-command <template>] [--tmux-prefix <p>] [...]
+  prd autopilot <dispatch|reconcile|tick> [--hub <path>] [--project <name>] [--max-parallel <n>] [--runner tmux|process|command] [--runner-command <template>] [--tmux-prefix <p>] [--codex-invoke exec|prompt] [...]
   prd sync [--hub <path>]
 
 Notes:

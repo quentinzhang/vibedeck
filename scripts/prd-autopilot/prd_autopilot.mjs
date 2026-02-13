@@ -176,6 +176,14 @@ function computeSessionName(tmuxPrefix, project, cardId) {
   return sanitizeKey(`${tmuxPrefix}-${project}-${cardId}`);
 }
 
+function artifactRootForRepo(repoPath) {
+  return path.join(repoPath, '.prd-autopilot');
+}
+
+function artifactRootForWorktree(worktreePath) {
+  return path.join(worktreePath, '.prd-autopilot');
+}
+
 async function ensureDir(dirPath) {
   await fs.mkdir(dirPath, { recursive: true });
 }
@@ -191,6 +199,21 @@ async function fileExists(filePath) {
 
 async function readText(filePath) {
   return fs.readFile(filePath, 'utf8');
+}
+
+async function fileExistsAny(paths) {
+  for (const p of paths) {
+    if (await fileExists(p)) return true;
+  }
+  return false;
+}
+
+async function readFirstText(paths) {
+  for (const p of paths) {
+    const raw = await readText(p).catch(() => '');
+    if (raw) return raw;
+  }
+  return '';
 }
 
 async function readAgentMapping(hubRoot) {
@@ -352,7 +375,8 @@ function buildWorkerPrompt({
     ``,
     `Hard constraints:`,
     `- Do NOT edit the PRD hub at ${hubRoot}. Treat it as read-only.`,
-    `- Work ONLY inside the repo worktree at: ${worktreePath}`,
+    `- Make code changes ONLY inside the repo worktree at: ${worktreePath}`,
+    `- Writing to the supervisor-provided artifact paths (Result JSON path / Worker log path) is allowed (and required in prompt/TUI mode).`,
     `- Immediately before the FINAL JSON, output a short natural-language summary message (not JSON).`,
     `- You MUST finish by emitting a FINAL JSON response matching the required output schema.`,
     `- Your FINAL message must be ONLY the JSON object (no prose before/after).`,
@@ -365,6 +389,7 @@ function buildWorkerPrompt({
           `IMPORTANT (prompt/TUI mode): Codex cannot auto-save your last message.`,
           `- You MUST ALSO write the same FINAL JSON object to the file path in "Result JSON path".`,
           `- Write ONLY the JSON object to that file (do not include the human-readable summary).`,
+          `- The "Result JSON path" may be outside the worktree; writing to it is permitted for this run.`,
           `- You may use PRD_AUTOPILOT_RESULT_PATH / PRD_AUTOPILOT_SCHEMA_PATH env vars if available.`,
         ]
       : []),
@@ -457,8 +482,8 @@ function normalizeCodexInvoke(raw) {
   throw new Error(`Invalid --codex-invoke: ${raw} (expected: exec|prompt)`);
 }
 
-function pidInfoPath({ worktreePath, runKey }) {
-  return path.join(worktreePath, '.prd-autopilot', 'results', `${runKey}.pid.json`);
+function pidInfoPath({ artifactRoot, runKey }) {
+  return path.join(artifactRoot, 'results', `${runKey}.pid.json`);
 }
 
 async function readPidInfo(pidPath) {
@@ -597,17 +622,24 @@ async function countActiveWorkers({ hubRoot, mapping, tmuxPrefix, projectFilter,
     const runKey = computeRunKey(project, cardId);
     const sessionName = computeSessionName(tmuxPrefix, project, cardId);
     const worktreePath = await resolveWorktreePath({ repoPath, project, cardId, runKey, worktreeDir });
-    const artifactRoot = path.join(worktreePath, '.prd-autopilot');
-    const resultPath = path.join(artifactRoot, 'results', `${runKey}.json`);
-    const exitPath = `${resultPath}.exitcode`;
-    const pidPath = pidInfoPath({ worktreePath, runKey });
+    const artifactRoots = [artifactRootForRepo(repoPath), artifactRootForWorktree(worktreePath)];
+    const resultPaths = artifactRoots.map((root) => path.join(root, 'results', `${runKey}.json`));
+    const exitPaths = resultPaths.map((p) => `${p}.exitcode`);
+    const pidPaths = artifactRoots.map((root) => pidInfoPath({ artifactRoot: root, runKey }));
 
-    const hasResult = await fileExists(resultPath);
-    const hasExit = await fileExists(exitPath);
+    const hasResult = await fileExistsAny(resultPaths);
+    const hasExit = await fileExistsAny(exitPaths);
     if (hasResult || hasExit) continue;
 
-    const pidInfo = await readPidInfo(pidPath);
-    if (pidInfo?.pid && isPidAlive(pidInfo.pid)) {
+    let hasLivePid = false;
+    for (const pidPath of pidPaths) {
+      const pidInfo = await readPidInfo(pidPath);
+      if (pidInfo?.pid && isPidAlive(pidInfo.pid)) {
+        hasLivePid = true;
+        break;
+      }
+    }
+    if (hasLivePid) {
       active += 1;
       continue;
     }
@@ -728,13 +760,13 @@ async function dispatchOnce({
     });
 
     const runKey = computeRunKey(project, cardId);
-    const artifactRoot = path.join(worktreePath, '.prd-autopilot');
+    const artifactRoot = artifactRootForRepo(repoPath);
     const promptsDir = path.join(artifactRoot, 'prompts');
     const resultsDir = path.join(artifactRoot, 'results');
     const promptAbs = path.join(promptsDir, `${runKey}.md`);
     const resultAbs = path.join(resultsDir, `${runKey}.json`);
     const logAbs = path.join(resultsDir, `${runKey}.log`);
-    const pidAbs = pidInfoPath({ worktreePath, runKey });
+    const pidAbs = pidInfoPath({ artifactRoot, runKey });
     const projectSchemaAbs = path.join(worktreePath, 'scripts', 'prd-autopilot', 'assets', 'result.schema.json');
     const hubSchemaAbs = path.join(hubRoot, 'skills', 'prd-worker', 'assets', 'result.schema.json');
     const schemaAbs = (await fileExists(projectSchemaAbs))
@@ -986,20 +1018,24 @@ async function reconcileOnce({
     const runKey = computeRunKey(project, cardId);
     const sessionName = computeSessionName(tmuxPrefix, project, cardId);
     const worktreePath = await resolveWorktreePath({ repoPath, project, cardId, runKey, worktreeDir });
-    const artifactRoot = path.join(worktreePath, '.prd-autopilot');
-    const resultPath = path.join(artifactRoot, 'results', `${runKey}.json`);
-    const exitPath = `${resultPath}.exitcode`;
-    const promptPath = path.join(artifactRoot, 'prompts', `${runKey}.md`);
+    const artifactRoots = [artifactRootForRepo(repoPath), artifactRootForWorktree(worktreePath)];
+    const resultPaths = artifactRoots.map((root) => path.join(root, 'results', `${runKey}.json`));
+    const exitPaths = resultPaths.map((p) => `${p}.exitcode`);
+    const promptPaths = artifactRoots.map((root) => path.join(root, 'prompts', `${runKey}.md`));
     const projectSchemaAbs = path.join(worktreePath, 'scripts', 'prd-autopilot', 'assets', 'result.schema.json');
 
-    const hasResult = await fileExists(resultPath);
-    const hasExit = await fileExists(exitPath);
+    const hasResult = await fileExistsAny(resultPaths);
+    const hasExit = await fileExistsAny(exitPaths);
     if (!hasResult && !hasExit) {
       const graceHours = Number.isFinite(infraGraceHours) ? infraGraceHours : 6;
       const graceMs = Math.max(0, graceHours) * 60 * 60 * 1000;
 
       if (!(await fileExists(projectSchemaAbs)) && !tmuxHasSession(sessionName)) {
-        const stat = await fs.stat(promptPath).catch(() => null);
+        let stat = null;
+        for (const p of promptPaths) {
+          stat = await fs.stat(p).catch(() => null);
+          if (stat) break;
+        }
         const ageMs = stat ? Date.now() - stat.mtimeMs : 0;
 	        if (stat && ageMs >= graceMs) {
 	          const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
@@ -1025,12 +1061,12 @@ async function reconcileOnce({
     let raw = null;
     if (hasResult) {
       try {
-        raw = JSON.parse(await readText(resultPath));
+        raw = JSON.parse(await readFirstText(resultPaths));
       } catch {
         raw = blockedResult('Invalid JSON output from worker', ['Invalid JSON output']);
       }
     } else {
-      const code = String(await readText(exitPath).catch(() => '1')).trim();
+      const code = String(await readFirstText(exitPaths).catch(() => '1')).trim();
       raw = blockedResult(`Worker exited without result JSON (exit=${code || '1'})`, [
         'Worker process exited before producing a valid result JSON',
       ]);

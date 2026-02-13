@@ -11,7 +11,8 @@ Complete exactly one PRD card in the repo worktree provided by the supervisor pr
 
 ## Operating Rules
 
-- Work only inside the provided worktree path.
+- Make code changes only inside the provided worktree path.
+- Writing to the supervisor-provided artifact paths (e.g. `PRD_AUTOPILOT_RESULT_PATH`, `PRD_AUTOPILOT_LOG_PATH`) is allowed, even if they are outside the worktree.
 - Use only the card content and context provided in the prompt.
 - If required inputs are missing (worktree path or card content), finish with `outcome: "blocked"` and list blockers.
 
@@ -40,11 +41,11 @@ Minimum shape (required top-level keys):
 
 You do **not** write result files yourself. The runner persists your FINAL JSON (last message) and captures logs/exit code.
 
-Assume the following stable locations (all under the repo worktree):
+Assume the following stable locations (default; legacy runs may store these under `<worktree>/.prd-autopilot`):
 
 ```
 runKey="<project>-<CARD_ID>"   # sanitized to A-Za-z0-9_.- (unknown chars replaced with "_")
-artifactRoot="<worktree>/.prd-autopilot"
+artifactRoot="<repo>/.prd-autopilot"
 result="$artifactRoot/results/$runKey.json"
 exitcode="$artifactRoot/results/$runKey.json.exitcode"
 log="$artifactRoot/results/$runKey.log"

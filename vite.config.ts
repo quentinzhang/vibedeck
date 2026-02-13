@@ -280,20 +280,36 @@ export default defineConfig(() => {
           ];
 
           let text = '';
+          let loaded = false;
           /** @type {any} */
           let lastErr = null;
-          for (const worktreePath of worktreeCandidates) {
-            const logAbs = path.resolve(worktreePath, '.prd-autopilot', 'results', `${runKey}.log`);
-            const baseWithSep = worktreePath.endsWith(path.sep) ? worktreePath : `${worktreePath}${path.sep}`;
+          try {
+            const logAbs = path.resolve(repoPath, '.prd-autopilot', 'results', `${runKey}.log`);
+            const baseWithSep = repoPath.endsWith(path.sep) ? repoPath : `${repoPath}${path.sep}`;
             if (!logAbs.startsWith(baseWithSep)) throw new Error('Invalid log path');
-            try {
-              ({ text } = await readLogText(logAbs, { maxBytes: 1024 * 1024 }));
-              lastErr = null;
-              break;
-            } catch (err: any) {
-              lastErr = err;
-              if (err?.code === 'ENOENT') continue;
-              throw err;
+            ({ text } = await readLogText(logAbs, { maxBytes: 1024 * 1024 }));
+            lastErr = null;
+            loaded = true;
+          } catch (err: any) {
+            lastErr = err;
+            if (err?.code !== 'ENOENT') throw err;
+          }
+
+          if (!loaded) {
+            for (const worktreePath of worktreeCandidates) {
+              const logAbs = path.resolve(worktreePath, '.prd-autopilot', 'results', `${runKey}.log`);
+              const baseWithSep = worktreePath.endsWith(path.sep) ? worktreePath : `${worktreePath}${path.sep}`;
+              if (!logAbs.startsWith(baseWithSep)) throw new Error('Invalid log path');
+              try {
+                ({ text } = await readLogText(logAbs, { maxBytes: 1024 * 1024 }));
+                lastErr = null;
+                loaded = true;
+                break;
+              } catch (err: any) {
+                lastErr = err;
+                if (err?.code === 'ENOENT') continue;
+                throw err;
+              }
             }
           }
           if (lastErr?.code === 'ENOENT') throw lastErr;

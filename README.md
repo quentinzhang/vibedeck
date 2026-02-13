@@ -112,7 +112,7 @@ node ./bin/prd.mjs autopilot tick --hub . --project <name> --max-parallel 2 --do
 Notes:
 - Autopilot uses per-card Git worktrees under each target repo (default: `.worktrees/<project>/<CARD_ID>`).
 - Worker launch is configurable via `--runner tmux|process|command` (default: `tmux`).
-- Worker artifacts are written under `<worktree>/.prd-autopilot/` (prompt, result JSON, exitcode, logs).
+- Worker artifacts are written under `<repo>/.prd-autopilot/` (prompt, result JSON, exitcode, logs). Legacy runs may exist under `<worktree>/.prd-autopilot/`.
 - The Definition of Ready gate is configurable via `--dor strict|loose|off` (default: `loose`). In `strict` mode, cards missing meaningful Acceptance Criteria / Test Plan are moved to `blocked` with an Autopilot note.
 - Each target project repo must provide a worker result schema at `scripts/prd-autopilot/assets/result.schema.json` inside the worktree; otherwise the card is blocked as “infra missing”.
 

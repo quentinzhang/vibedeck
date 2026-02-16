@@ -1,5 +1,5 @@
 {
-  "hubRoot": "~/prd",
+  "hubRoot": "/var/www/prd",
   "projectsDir": "projects",
   "autopilot": {
     "maxParallel": 2

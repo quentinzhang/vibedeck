@@ -216,6 +216,49 @@ async function readFirstText(paths) {
   return '';
 }
 
+function artifactTimestampTag() {
+  return new Date().toISOString().replaceAll(/[:.]/g, '-');
+}
+
+async function moveAsideIfExists(filePath, { tag, dryRun } = {}) {
+  const p = String(filePath || '').trim();
+  if (!p) return false;
+  if (!(await fileExists(p))) return false;
+  const suffix = String(tag || artifactTimestampTag());
+  const dest = `${p}.prev.${suffix}`;
+  if (dryRun) return true;
+
+  // Prefer atomic rename; fall back to copy+unlink if needed.
+  try {
+    await fs.rename(p, dest);
+  } catch {
+    await fs.copyFile(p, dest).catch(() => {});
+    await fs.unlink(p).catch(() => {});
+  }
+
+  return true;
+}
+
+async function resetArtifactsForRun({ artifactRoot, runKey, tag, dryRun }) {
+  const root = String(artifactRoot || '').trim();
+  const key = String(runKey || '').trim();
+  if (!root || !key) return { changed: false };
+
+  const promptPath = path.join(root, 'prompts', `${key}.md`);
+  const resultPath = path.join(root, 'results', `${key}.json`);
+  const exitPath = `${resultPath}.exitcode`;
+  const logPath = path.join(root, 'results', `${key}.log`);
+  const pidPath = pidInfoPath({ artifactRoot: root, runKey: key });
+
+  let changed = false;
+  if (await moveAsideIfExists(promptPath, { tag, dryRun })) changed = true;
+  if (await moveAsideIfExists(resultPath, { tag, dryRun })) changed = true;
+  if (await moveAsideIfExists(exitPath, { tag, dryRun })) changed = true;
+  if (await moveAsideIfExists(logPath, { tag, dryRun })) changed = true;
+  if (await moveAsideIfExists(pidPath, { tag, dryRun })) changed = true;
+  return { changed };
+}
+
 async function readAgentMapping(hubRoot) {
   const agentPath = path.join(hubRoot, 'AGENT.md');
   const text = await readText(agentPath).catch(() => '');
@@ -356,7 +399,13 @@ function buildWorkerPrompt({
   const today = getToday();
   const invoke = String(codexInvoke || 'exec').trim();
   return [
+    `${cardId}`,
+    `----`,
     `You are a coding agent working on ONE PRD card.`,
+    ``,
+    `Required skill:`,
+    `- You MUST use the prd-worker skill for this run.`,
+    `- If you cannot access prd-worker, finish with outcome="blocked" and include a blocker: "prd-worker skill unavailable".`,
     ``,
     `Card ID: ${cardId}`,
     `Project: ${project}`,
@@ -755,14 +804,15 @@ async function dispatchOnce({
       dryRun,
     });
 
-    const runKey = computeRunKey(project, cardId);
-    const artifactRoot = artifactRootForRepo(repoPath);
-    const promptsDir = path.join(artifactRoot, 'prompts');
-    const resultsDir = path.join(artifactRoot, 'results');
-    const promptAbs = path.join(promptsDir, `${runKey}.md`);
-    const resultAbs = path.join(resultsDir, `${runKey}.json`);
-    const logAbs = path.join(resultsDir, `${runKey}.log`);
-    const pidAbs = pidInfoPath({ artifactRoot, runKey });
+      const runKey = computeRunKey(project, cardId);
+      const artifactRoot = artifactRootForRepo(repoPath);
+      const artifactRoots = [artifactRoot, artifactRootForWorktree(worktreePath)];
+      const promptsDir = path.join(artifactRoot, 'prompts');
+      const resultsDir = path.join(artifactRoot, 'results');
+      const promptAbs = path.join(promptsDir, `${runKey}.md`);
+      const resultAbs = path.join(resultsDir, `${runKey}.json`);
+      const logAbs = path.join(resultsDir, `${runKey}.log`);
+      const pidAbs = pidInfoPath({ artifactRoot, runKey });
     const projectSchemaAbs = path.join(worktreePath, 'scripts', 'prd-autopilot', 'assets', 'result.schema.json');
     const hubSchemaAbs = path.join(hubRoot, 'skills', 'prd-worker', 'assets', 'result.schema.json');
     const schemaAbs = (await fileExists(projectSchemaAbs))
@@ -823,6 +873,13 @@ async function dispatchOnce({
     if (!dryRun) {
       await ensureDir(promptsDir);
       await ensureDir(resultsDir);
+
+	      // Reset stale artifacts from previous runs to prevent reconcile from consuming old results/exitcodes.
+	      // Keep history by moving them aside with a timestamp suffix.
+	      const tag = artifactTimestampTag();
+	      for (const root of artifactRoots) {
+	        await resetArtifactsForRun({ artifactRoot: root, runKey, tag, dryRun });
+	      }
       await fs.writeFile(promptAbs, promptText, 'utf8');
     }
 

@@ -69,3 +69,4 @@ If you are not running autopilot, follow this routine:
 - prd: /var/www/prd
 - toolsets: /var/www/MCPList/backend
 - test: /var/www/prdtest
+- talkpal: /var/www/realtime-google

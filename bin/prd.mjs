@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -68,6 +69,19 @@ async function pathExists(p) {
   }
 }
 
+function expandHomePath(inputPath) {
+  const raw = String(inputPath || '').trim();
+  if (!raw) return raw;
+  if (raw === '~') return os.homedir();
+  if (raw.startsWith('~/') || raw.startsWith('~\\')) return path.join(os.homedir(), raw.slice(2));
+  return raw;
+}
+
+async function looksLikeHubRoot(rootPath) {
+  if (!rootPath) return false;
+  return (await pathExists(path.join(rootPath, 'AGENT.md'))) && (await pathExists(path.join(rootPath, 'projects')));
+}
+
 async function findHubRootFromCwd(cwd) {
   let dir = path.resolve(cwd);
   while (true) {
@@ -102,7 +116,10 @@ async function readHubRootFromPrdConfig({ repoRoot }) {
     if (!parsed || typeof parsed !== 'object') return '';
     const value = String(parsed.hubRoot || parsed.hub_root || '').trim();
     if (!value) return '';
-    return path.isAbsolute(value) ? path.resolve(value) : path.resolve(repoRoot, value);
+    const expanded = expandHomePath(value);
+    const resolved = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(repoRoot, expanded);
+    if (!(await looksLikeHubRoot(resolved))) return '';
+    return resolved;
   } catch {
     return '';
   }

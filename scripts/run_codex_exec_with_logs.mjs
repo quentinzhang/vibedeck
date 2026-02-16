@@ -60,6 +60,16 @@ function blockedResult(summary, blockers = []) {
   };
 }
 
+function formatSpawnError(err) {
+  const code = err && typeof err === 'object' && 'code' in err ? String(err.code || '') : '';
+  const syscall = err && typeof err === 'object' && 'syscall' in err ? String(err.syscall || '') : '';
+  const message = err && typeof err === 'object' && 'message' in err ? String(err.message || '') : String(err || '');
+  const details = [];
+  if (code) details.push(`code=${code}`);
+  if (syscall) details.push(`syscall=${syscall}`);
+  return `${details.length ? `[${details.join(' ')}] ` : ''}${message}`.trim();
+}
+
 function formatWorkerResultSummary(result) {
   if (!result || typeof result !== 'object') return '';
 
@@ -223,6 +233,34 @@ async function main() {
 
   await new Promise((resolve) => {
     const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+    let finished = false;
+
+    const finish = async (code, { reason, ensureResultJson } = {}) => {
+      if (finished) return;
+      finished = true;
+
+      const n = Number.isFinite(code) ? code : 1;
+
+      if (reason) {
+        const msg = `\n# ERROR: ${reason}\n`;
+        process.stderr.write(msg);
+        logStream.write(msg);
+      }
+
+      if (ensureResultJson) {
+        const raw = await fsp.readFile(outPath, 'utf8').catch(() => '');
+        if (!raw) {
+          await fsp.writeFile(outPath, `${JSON.stringify(ensureResultJson, null, 2)}\n`, 'utf8').catch(() => {});
+        }
+      }
+
+      await appendWorkerResultSummaryToLogs({ outPath, logStream }).catch(() => {});
+      logStream.write(`\n# codex ${invoke} exited_at=${new Date().toISOString()} code=${n}\n`);
+      logStream.end();
+      await fsp.writeFile(exitPath, `${n}\n`, 'utf8').catch(() => {});
+      resolve();
+    };
+
     logStream.write(`\n# codex invoke=${invoke} started_at=${new Date().toISOString()}\n`);
     logStream.write(`# env: ${openclawEnv.loaded ? 'loaded' : 'missing'} ${openclawEnv.path}\n`);
 
@@ -235,6 +273,12 @@ async function main() {
       logStream.write(`# cmd: ${codexCmd} ${codexArgs.join(' ')}\n`);
 
       const child = spawn(codexCmd, codexArgs, { stdio: ['pipe', 'pipe', 'pipe'], env: baseEnv });
+      child.on('error', (err) => {
+        const hint = `Failed to spawn codex. Fix: ensure codex is on PATH or pass --codex /absolute/path/to/codex. (${formatSpawnError(err)})`;
+        finish(1, { reason: hint, ensureResultJson: blockedResult('Codex failed to start (spawn error)', [hint]) }).catch(
+          () => {},
+        );
+      });
       child.stdout.on('data', (chunk) => {
         process.stdout.write(chunk);
         logStream.write(chunk);
@@ -247,12 +291,7 @@ async function main() {
       child.stdin.end();
 
       child.on('exit', async (code) => {
-        const n = Number.isFinite(code) ? code : 1;
-        await appendWorkerResultSummaryToLogs({ outPath, logStream }).catch(() => {});
-        logStream.write(`\n# codex exec exited_at=${new Date().toISOString()} code=${n}\n`);
-        logStream.end();
-        await fsp.writeFile(exitPath, `${n}\n`, 'utf8').catch(() => {});
-        resolve();
+        await finish(code, { reason: '' });
       });
       return;
     }
@@ -266,9 +305,13 @@ async function main() {
     logStream.write(`# NOTE: interactive prompt mode may not exit automatically; attach via tmux if needed.\n`);
 
     const child = spawn(codexCmd, codexArgs, { stdio: 'inherit', env: baseEnv, cwd: workdir });
+    child.on('error', (err) => {
+      const hint = `Failed to spawn codex. Fix: ensure codex is on PATH or pass --codex /absolute/path/to/codex. (${formatSpawnError(err)})`;
+      finish(1, { reason: hint, ensureResultJson: blockedResult('Codex failed to start (spawn error)', [hint]) }).catch(
+        () => {},
+      );
+    });
     child.on('exit', async (code) => {
-      const n = Number.isFinite(code) ? code : 1;
-
       // In prompt/TUI mode Codex cannot write --output-last-message, so require the agent to write output JSON itself.
       const raw = await fsp.readFile(outPath, 'utf8').catch(() => '');
       if (!raw) {
@@ -303,11 +346,7 @@ async function main() {
         }
       }
 
-      await appendWorkerResultSummaryToLogs({ outPath, logStream }).catch(() => {});
-      logStream.write(`\n# codex prompt exited_at=${new Date().toISOString()} code=${n}\n`);
-      logStream.end();
-      await fsp.writeFile(exitPath, `${n}\n`, 'utf8').catch(() => {});
-      resolve();
+      await finish(code, { reason: '' });
     });
   });
 }

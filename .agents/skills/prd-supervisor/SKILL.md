@@ -1,9 +1,9 @@
 ---
 name: prd-supervisor
-description: "Use when operating as a scheduler-only PRD Hub supervisor: manage cards via `prd ...`, dispatch non-interactive `codex exec` workers in isolated `tmux` sessions + git worktrees, and reconcile card status by reading each worker's result JSON from the mapped project worktree."
+description: "Use when operating as a scheduler-only Rushdeck supervisor for a local-first Kanban workflow: manage cards via `prd ...`, dispatch non-interactive `codex exec` workers in isolated `tmux` sessions + git worktrees, and reconcile card status by reading each worker's result JSON from the mapped project worktree."
 ---
 
-# PRD Supervisor (Scheduler-Only)
+# Rushdeck Supervisor (Scheduler-Only)
 
 ## Role (Hard Constraints)
 
@@ -32,7 +32,7 @@ Cards:
 - Card format: Markdown with YAML frontmatter (see `projects/_templates/requirement-card.md`)
 
 Mapping:
-- Project → repo mapping lives in `AGENT.md` (machine-parsed lines: `{project}: /abs/repo/path`)
+- Project → repo mapping lives in `PROJECTS.json` (legacy fallback: `AGENT.md`)
 
 Worker artifacts (project-local, per card worktree):
 - Worktree: `<repo>/.worktrees/<CARD_ID>`
@@ -99,25 +99,29 @@ Hub resolution order (when `--hub` is omitted):
 | Move card | `prd move --relPath projects/{project}/{status}/{file}.md --to in-progress` |
 | Archive card | `prd archive --relPath projects/{project}/{status}/{file}.md` |
 | List pending | `prd list pending --project <name> --json --sync` |
-| Autopilot (dispatch) | `prd autopilot dispatch --project <name> --max-parallel 2` |
-| Autopilot (reconcile) | `prd autopilot reconcile --project <name>` |
-| Autopilot (tick) | `prd autopilot tick --project <name> --max-parallel 2` |
+| Roll (dispatch) | `prd roll dispatch --project <name> --max-parallel 2` |
+| Roll (reconcile) | `prd roll reconcile --project <name>` |
+| Roll (tick) | `prd roll tick --project <name> --max-parallel 2` |
 
 ### PRD CLI Command List (Terminal)
 
 All commands exposed by the hub `prd` CLI:
 
 - `prd help`
-- `prd autopilot help`
+- `prd roll help` (preferred)
+- `prd autopilot help` (legacy alias)
 - `prd project add ...` (alias: `prd project new ...`)
 - `prd add ...` (alias: `prd new ...`)
 - `prd move ...`
 - `prd archive ...`
 - `prd list pending ...`
 - `prd sync ...`
-- `prd autopilot dispatch ...`
-- `prd autopilot reconcile ...`
-- `prd autopilot tick ...`
+- `prd roll dispatch ...`
+- `prd roll reconcile ...`
+- `prd roll tick ...`
+- `prd autopilot dispatch ...` (legacy alias)
+- `prd autopilot reconcile ...` (legacy alias)
+- `prd autopilot tick ...` (legacy alias)
 
 Autopilot options (common):
 
@@ -136,9 +140,9 @@ Autopilot options (common):
 
 Examples:
 
-- No `tmux` required: `prd autopilot dispatch --runner process`
-- Custom launcher (shell): `prd autopilot dispatch --runner command --runner-command "{node_q} {runScript_q} --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
-- OpenClaw coding-agent launcher: `prd autopilot dispatch --runner command --runner-command "{node_q} {openclawRunScript_q} --openclaw-agent main --openclaw-session-id {sessionName_q} --openclaw-timeout 3600 --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
+- No `tmux` required: `prd roll dispatch --runner process`
+- Custom launcher (shell): `prd roll dispatch --runner command --runner-command "{node_q} {runScript_q} --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
+- OpenClaw coding-agent launcher: `prd roll dispatch --runner command --runner-command "{node_q} {openclawRunScript_q} --openclaw-agent main --openclaw-session-id {sessionName_q} --openclaw-timeout 3600 --mode {codexMode_q} --codex {codexCmd_q} --workdir {worktreePath_q} --prompt {promptAbs_q} --schema {schemaAbs_q} --output {resultAbs_q} --log {logAbs_q} --skip-git-repo-check"`
 
 ## Supervisor ↔ Worker Contract (Stability-Critical)
 
@@ -200,7 +204,7 @@ Reconcile is driven by the **worker result JSON file in the project worktree** (
 For each card currently in `projects/<project>/in-progress/**`:
 
 1) Compute locations (all deterministic):
-   - `repoPath`: from `<hub>/AGENT.md` mapping for `<project>`
+  - `repoPath`: from `<hub>/PROJECTS.json` mapping for `<project>`
    - `cardId`: from card frontmatter `id`
    - `runKey = "<project>-<CARD_ID>"` (sanitized)
    - `worktree = "<repoPath>/.worktrees/<CARD_ID>"`
@@ -225,7 +229,7 @@ Do not attach to tmux or wait; reconciliation is based on files only.
 Use an absolute `hub` path and a predictable PATH for cron. Example (run every minute):
 
 ```
-* * * * * cd "$HOME/prd" && /usr/bin/env node bin/prd.mjs autopilot reconcile --hub "$HOME/prd" --no-sync >> /tmp/prd-reconcile.log 2>&1
+* * * * * cd "$HOME/prd" && /usr/bin/env node bin/prd.mjs roll reconcile --hub "$HOME/prd" --no-sync >> /tmp/prd-reconcile.log 2>&1
 ```
 
 Notes:

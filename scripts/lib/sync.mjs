@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { parseAgentProjects } from './agentMapping.mjs';
+import { parseAgentProjects, parseProjectRegistry } from './agentMapping.mjs';
 import { extractFrontmatter, parseFrontmatterFields } from './frontmatter.mjs';
 
 const STATUS_DIRS = /** @type {const} */ ([
@@ -65,10 +65,25 @@ async function fileExists(filePath) {
   }
 }
 
-async function readAgentMapping(agentPath) {
-  if (!(await fileExists(agentPath))) return new Map();
-  const text = await fs.readFile(agentPath, 'utf8');
-  return parseAgentProjects(text);
+async function readProjectMapping({ registryPath, agentPath }) {
+  if (registryPath && (await fileExists(registryPath))) {
+    const raw = await fs.readFile(registryPath, 'utf8').catch(() => '');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        return parseProjectRegistry(parsed);
+      } catch {
+        // Fall through to AGENT.md legacy mapping.
+      }
+    }
+  }
+
+  if (agentPath && (await fileExists(agentPath))) {
+    const text = await fs.readFile(agentPath, 'utf8');
+    return parseAgentProjects(text);
+  }
+
+  return new Map();
 }
 
 async function listMarkdownFiles(dirPath) {
@@ -108,7 +123,8 @@ export async function buildHubStatus({ repoRoot } = {}) {
   const root = path.resolve(String(repoRoot || '.'));
   const projectsRoot = path.join(root, 'projects');
   const agentPath = path.join(root, 'AGENT.md');
-  const mapping = await readAgentMapping(agentPath);
+  const registryPath = path.join(root, 'PROJECTS.json');
+  const mapping = await readProjectMapping({ registryPath, agentPath });
 
   const entries = await fs.readdir(projectsRoot, { withFileTypes: true }).catch(() => []);
   const projectNames = entries
@@ -124,6 +140,13 @@ export async function buildHubStatus({ repoRoot } = {}) {
     const projectRoot = path.join(projectsRoot, name);
     const counts = emptyCounts();
     const warnings = [];
+
+    if (!mapping.has(name)) {
+      warnings.push({
+        type: 'missing_repo_mapping',
+        project: name,
+      });
+    }
 
     const files = await listMarkdownFiles(projectRoot).catch(() => []);
     for (const filePath of files) {
@@ -203,7 +226,7 @@ export function renderStatusMarkdown(status) {
   const projects = Array.isArray(status?.projects) ? status.projects : [];
 
   const lines = [];
-  lines.push('# PRD Hub Status Board', '', `Last updated: ${today}`, '');
+  lines.push('# Rushdeck Status Board', '', `Last updated: ${today}`, '');
   lines.push('## Projects', '');
 
   if (projects.length === 0) {
@@ -228,6 +251,8 @@ export function renderStatusMarkdown(status) {
         lines.push(
           `- status mismatch: \`${w.relPath}\` (frontmatter: \`${w.frontmatterStatus}\`, folder: \`${w.folderStatus}\`)`,
         );
+      } else if (w?.type === 'missing_repo_mapping') {
+        lines.push(`- missing repo mapping: project \`${w.project}\` is not registered in \`PROJECTS.json\``);
       } else {
         lines.push(`- ${JSON.stringify(w)}`);
       }

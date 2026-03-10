@@ -1,123 +1,146 @@
-# PRD Hub
+# Rushdeck
 
-A local hub repo for managing requirement cards (PRDs) across multiple projects.
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-## Quick start
+Rushdeck is a lightweight local-first Kanban hub for personal developer workflows. It combines Markdown requirement cards, a visual board, terminal-first operations, OpenClaw-powered card creation, and automated dispatch to coding agents so you can run a lightweight Vibe Coding loop across one or more projects.
 
-1) Install dependencies:
+## Why I Built Rushdeck
+
+As an independent developer, I need to manage multiple projects at the same time. I want to be able to capture new requirements whenever they appear, without being blocked by location, device, or time. I also need those requirements to become clear enough that an AI Assistant can reliably drive a Coding Agent, while the overall project workflow stays simple, organized, and easy to maintain.
+
+Rushdeck is the result of that need: a local-first way to turn scattered ideas into structured cards, structured cards into agent-ready tasks, and multiple project streams into one orderly Kanban workflow.
+
+## Design Philosophy
+
+1. Local-first. Markdown cards, local repos, and local automation stay at the center of the workflow.
+2. Keep it simple. The system is intentionally lightweight: files, terminal commands, and a small dashboard instead of a heavy PM stack.
+3. Switch flexibly. Rushdeck is designed so the coding layer can be swapped to fit your preferred agent flow, including Codex and Claude Code oriented workflows.
+
+## How Rushdeck Works
+
+1. Capture ideas anywhere.
+  - Use OpenClaw skills or `prd` commands to turn natural language ideas into requirement cards whenever work appears.
+2. Clarify work into agent-ready tasks.
+  - Keep cards in Markdown so specs, acceptance criteria, notes, and status stay readable, editable, and easy to refine.
+3. Organize work in one Kanban view.
+  - Review progress across projects in the local board, move work with drag-and-drop, and keep everything visible without adding process overhead.
+4. Dispatch implementation to coding agents.
+  - Use `prd roll tick` or related commands to assign ready cards to Coding Agents such as Codex, Claude Code, or OpenClaw-assisted runners.
+5. Reconcile execution back into the system.
+  - Let Rushdeck sync logs, status, and board summaries back into the same local workflow so project management remains simple and orderly.
+
+## Requirements
+
+- Node.js `>=20`
+- npm `>=10`
+- Git
+- Optional: `tmux` (recommended for `roll` with `--runner tmux`)
+
+## Quick Start
+
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-2) Build the status index (writes `public/status.json` and `STATUS.md`):
-
-```bash
-npm run prd:sync
-```
-
-You can also use the CLI wrapper:
-
-```bash
-node ./bin/prd.mjs sync --hub .
-```
-
-3) Start the dashboard:
+2. Start the Kanban dashboard:
 
 ```bash
 npm run dev
 ```
 
-Open:
-- `http://localhost:5566/` or `http://localhost:5566/prd.html`
+Open `http://localhost:5566/` (or `http://localhost:5566/prd.html`).
 
-## Dashboard
+Examples below use `prd ...` for readability. If `prd` is not available on your `PATH`, replace it with `node ./bin/prd.mjs ...`.
 
-- Drag cards between columns: updates the card frontmatter (`status`, `updated_at`), then triggers a `prd:sync`. (Only the `archived` status is folder-backed under `projects/<project>/archived/`.)
-- Click a card: shows the raw Markdown content in a sidebar.
-- In the card sidebar, click `Edit` to open the Markdown file in a local editor (tries `PRD_DASHBOARD_EDITOR`, then `code`/`cursor`, then OS default opener).
+3. Initialize skills
 
-Security note: the built-in API is local-only by default. Set `PRD_DASHBOARD_ALLOW_REMOTE=true` to allow non-local requests.
+项目中有两个核心技能：
 
-## Repository layout
-
-- `projects/<project>/*.md`: requirement cards (non-archived; local-only; ignored by git)
-- `projects/<project>/archived/*.md`: archived cards (excluded from daily rotation)
-- `_templates/requirement-card.md`: shared card template (used for all projects)
-- `AGENT.md`: Project → Repo mapping (used by scripts and autopilot)
-- `STATUS.md` and `public/status.json`: generated board index (via `prd:sync`)
-
-## Status machine
-
-All projects share the same statuses. The source of truth is the card frontmatter field `status` (folder name is only a legacy fallback for older hubs).
-
-- `drafts`
-- `pending`
-- `in-progress`
-- `blocked` (missing spec/AC, external dependency, infra missing)
-- `in-review`
-- `done`
-- `archived` (recommended to keep under `projects/<project>/archived/`)
-
-Rule: update frontmatter `status` to change status; the dashboard/CLI keeps `updated_at` fresh. If a card lives under a legacy status folder, the hub will still load it, but `status` will be taken from frontmatter first.
-
-Recommended main flow: `drafts` → `pending` → `in-progress` → `in-review` → `done` → `archived`.
-
-## Card frontmatter
-
-Required (minimum executable card):
-- `id`, `title`, `type`, `priority`, `component`
-- `created_at`, `updated_at` (`YYYY-MM-DD`)
-- `spec` (`"self"` for “this card is the spec”, or a link/path)
-
-Common optional:
-- `severity` (bug only: `S0`-`S3`)
-- `due_at`, `estimate`, `labels`
-- `related_files`, `related_cards`
-
-## CLI
-
-This repo exposes a `prd` CLI wrapper around the hub scripts. If `prd` is not on your PATH, use `node ./bin/prd.mjs ...`.
-
-From hub root:
-
-Default card template is `lite`; pass `--template full` for the detailed template.
+## Core Commands
 
 ```bash
-node ./bin/prd.mjs help
-node ./bin/prd.mjs sync --hub .
-node ./bin/prd.mjs project add --hub . --project <name> --repo-path <abs> --non-interactive
-node ./bin/prd.mjs project list --hub .
-node ./bin/prd.mjs add --hub . --project <name> --template full --type bug --title "..." --priority P1 --component ui --status pending --non-interactive
-node ./bin/prd.mjs add --hub . --project <name> --template lite --title "Quick draft" --non-interactive
-node ./bin/prd.mjs list pending --hub . --sync
+prd help
+prd project map migrate --hub .
+prd sync --hub .
+prd project map list --hub .
+prd project list --hub .
+prd add --hub . --project <name> --template lite --title "Quick draft" --non-interactive
+prd move --hub . --relPath projects/<project>/<card>.md --to in-progress
+prd list pending --hub . --sync
 ```
 
-The same operations are also available via `npm run prd:*` scripts (see `package.json`).
-
-## Autopilot (scheduler-only supervisor)
-
-Autopilot is a non-blocking supervisor loop that:
-
-1) Reconciles finished worker runs into card status updates, then
-2) Dispatches new workers for ready `pending` cards (bounded parallelism)
-
-Run it via the CLI wrapper:
+Preferred supervisor loop:
 
 ```bash
-node ./bin/prd.mjs autopilot tick --hub . --project <name> --max-parallel 2
-node ./bin/prd.mjs autopilot tick --hub . --project <name> --max-parallel 2 --dor off
+prd roll tick --hub . --project <name> --max-parallel 2
 ```
 
-Notes:
-- Autopilot uses per-card Git worktrees under each target repo (default: `.worktrees/<project>/<CARD_ID>`).
-- Worker launch is configurable via `--runner tmux|process|command` (default: `tmux`).
-- Worker artifacts are written under `<repo>/.prd-autopilot/` (prompt, result JSON, exitcode, logs). Legacy runs may exist under `<worktree>/.prd-autopilot/`.
-- The Definition of Ready gate is configurable via `--dor strict|loose|off` (default: `loose`). In `strict` mode, cards missing meaningful Acceptance Criteria / Test Plan are moved to `blocked` with an Autopilot note.
-- Each target project repo must provide a worker result schema at `scripts/prd-autopilot/assets/result.schema.json` inside the worktree; otherwise the card is blocked as “infra missing”.
+This command is designed to be run manually or from a scheduler such as `cron` or `launchd` so Rushdeck can continuously pick ready cards, dispatch them to coding agents, and reconcile progress back into the board.
 
-For the full supervisor/worker contract, see `.agents/skills/prd-supervisor/SKILL.md`.
+Legacy compatibility alias:
 
-## References
+```bash
+prd autopilot tick --hub . --project <name> --max-parallel 2
+```
 
-- `skills/prd-card-manager/references/requirement-card-spec.md`: full card schema and conventions
+## Configuration
+
+### `prd.config.json`
+
+`prd.config.json` is optional and used by the CLI as a convenience default.
+
+```json
+{
+  "hubRoot": ".",
+  "projectsDir": "projects",
+  "autopilot": {
+    "maxParallel": 2
+  },
+  "editor": "code"
+}
+```
+
+### Environment variables
+
+- `PRD_HUB_ROOT`: override hub root path
+- `PRD_DASHBOARD_EDITOR`: preferred editor command for card edit action
+- `PRD_DASHBOARD_ALLOW_REMOTE`: set to `true`/`1` to allow non-local dashboard API access
+- `PRD_TMUX_BIN`: absolute path to `tmux` if not discoverable from `PATH`
+
+## Repository Layout
+
+- `projects/<project>/*.md`: active cards (local workspace data)
+- `projects/<project>/archived/*.md`: archived cards
+- `_templates/`: shared card templates
+- `scripts/`: card/board/supervisor implementation
+- `bin/prd.mjs`: CLI wrapper
+- `src/`: dashboard frontend
+- `tests/`: Node test suite
+
+## Development
+
+```bash
+npm run dev
+npm run build
+npm run test
+npm run prd:sync
+```
+
+## Open-source defaults
+
+- `projects/`, `STATUS.md`, and `public/status.json` are ignored by default to avoid leaking local project data
+- `PROJECTS.json` is the preferred mapping registry; add entries with `prd project map add`
+- Legacy AGENT mappings can be bulk-imported with `prd project map migrate`
+- `AGENT.md` is now human-oriented guidance only; legacy mapping fallback is still supported
+- Keep sensitive credentials in environment variables or untracked local files
+
+## Contributing & Security
+
+- Contribution guide: `CONTRIBUTING.md`
+- Security policy: `SECURITY.md`
+
+## License
+
+MIT (`LICENSE`).

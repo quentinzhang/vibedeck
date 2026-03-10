@@ -52,8 +52,8 @@ test('prd CLI supports project new, project list, new, and list pending (with hu
     );
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
     assert.equal(await exists(path.join(tmp, 'projects', 'p1', 'archived')), true);
-    const agent = await read(path.join(tmp, 'AGENT.md'));
-    assert.match(agent, /- p1: \/tmp\/repo/);
+    const registry = JSON.parse(await read(path.join(tmp, 'PROJECTS.json')));
+    assert.equal(registry.projects.p1.repoPath, '/tmp/repo');
   }
 
   // 2) Project list
@@ -205,4 +205,69 @@ test('prd CLI supports move + archive and enforces unique ids per project', asyn
     assert.notEqual(res.status, 0);
     assert.match((res.stderr || '') + (res.stdout || ''), /duplicate id/i);
   }
+});
+
+test('prd CLI exposes roll as the preferred supervisor command and keeps autopilot compatibility', async () => {
+  const repoRoot = process.cwd();
+  const prdBin = path.join(repoRoot, 'bin', 'prd.mjs');
+
+  const helpRes = spawnSync(process.execPath, [prdBin, 'help'], { encoding: 'utf8' });
+  assert.equal(helpRes.status, 0, (helpRes.stderr || '') + (helpRes.stdout || ''));
+  assert.match(helpRes.stdout || '', /prd roll <dispatch\|reconcile\|tick>/);
+  assert.match(helpRes.stdout || '', /prd autopilot <dispatch\|reconcile\|tick> .*legacy alias/i);
+
+  const rollHelpRes = spawnSync(process.execPath, [prdBin, 'roll', 'help'], { encoding: 'utf8' });
+  assert.equal(rollHelpRes.status, 0, (rollHelpRes.stderr || '') + (rollHelpRes.stdout || ''));
+
+  const autopilotHelpRes = spawnSync(process.execPath, [prdBin, 'autopilot', 'help'], { encoding: 'utf8' });
+  assert.equal(autopilotHelpRes.status, 0, (autopilotHelpRes.stderr || '') + (autopilotHelpRes.stdout || ''));
+});
+
+test('prd CLI supports project map add and list', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-cli-map-'));
+  const repoRoot = process.cwd();
+
+  await fs.symlink(path.join(repoRoot, 'skills'), path.join(tmp, 'skills'), 'dir');
+  await fs.symlink(path.join(repoRoot, 'scripts'), path.join(tmp, 'scripts'), 'dir');
+
+  const prdBin = path.join(repoRoot, 'bin', 'prd.mjs');
+
+  const addRes = spawnSync(
+    process.execPath,
+    [prdBin, 'project', 'map', 'add', '--hub', tmp, '--project', 'p2', '--repo-path', '/tmp/p2', '--non-interactive'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(addRes.status, 0, (addRes.stderr || '') + (addRes.stdout || ''));
+
+  const listRes = spawnSync(process.execPath, [prdBin, 'project', 'map', 'list', '--hub', tmp], { encoding: 'utf8' });
+  assert.equal(listRes.status, 0, (listRes.stderr || '') + (listRes.stdout || ''));
+  assert.match(listRes.stdout || '', /- p2: \/tmp\/p2/);
+});
+
+test('prd CLI supports project map migrate', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-cli-map-migrate-'));
+  const repoRoot = process.cwd();
+
+  await fs.symlink(path.join(repoRoot, 'skills'), path.join(tmp, 'skills'), 'dir');
+  await fs.symlink(path.join(repoRoot, 'scripts'), path.join(tmp, 'scripts'), 'dir');
+  await fs.writeFile(
+    path.join(tmp, 'AGENT.md'),
+    '# guide\n\n- legacy1: /tmp/legacy1\n- legacy2: /tmp/legacy2\n',
+    'utf8',
+  );
+  await fs.writeFile(path.join(tmp, 'PROJECTS.json'), '{"projects":{}}\n', 'utf8');
+  await fs.mkdir(path.join(tmp, 'projects'), { recursive: true });
+
+  const prdBin = path.join(repoRoot, 'bin', 'prd.mjs');
+
+  const migrateRes = spawnSync(
+    process.execPath,
+    [prdBin, 'project', 'map', 'migrate', '--hub', tmp],
+    { encoding: 'utf8' },
+  );
+  assert.equal(migrateRes.status, 0, (migrateRes.stderr || '') + (migrateRes.stdout || ''));
+
+  const registry = JSON.parse(await read(path.join(tmp, 'PROJECTS.json')));
+  assert.equal(registry.projects.legacy1.repoPath, '/tmp/legacy1');
+  assert.equal(registry.projects.legacy2.repoPath, '/tmp/legacy2');
 });

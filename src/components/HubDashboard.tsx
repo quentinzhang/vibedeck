@@ -394,7 +394,7 @@ export default function HubDashboard() {
       <div className="mx-auto max-w-7xl px-4 py-8">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">PRD Hub</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Rushdeck</h1>
             <p className="text-sm text-zinc-400">
               {data?.generated_at ? (
                 <>
@@ -521,9 +521,25 @@ export default function HubDashboard() {
           </div>
         ) : null}
 
-        {selectedProjectSummary?.repo_path ? (
-          <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-200">
-            Repo: <span className="font-mono text-xs">{selectedProjectSummary.repo_path}</span>
+        {selectedProjectSummary ? (
+          <div
+            className={`mt-6 rounded-lg border p-4 text-sm ${
+              selectedProjectSummary.repo_path
+                ? 'border-zinc-800 bg-zinc-950/40 text-zinc-200'
+                : 'border-amber-800/50 bg-amber-950/20 text-amber-200'
+            }`}
+          >
+            {selectedProjectSummary.repo_path ? (
+              <>
+                Repo: <span className="font-mono text-xs">{selectedProjectSummary.repo_path}</span>
+              </>
+            ) : (
+              <>
+                Missing repo mapping for <span className="font-mono text-xs">{selectedProjectSummary.name}</span>. Add it to{' '}
+                <span className="font-mono text-xs">PROJECTS.json</span> or run{' '}
+                <span className="font-mono text-xs">prd project map add --hub . --project {selectedProjectSummary.name} --repo-path &lt;absolute-path&gt; --non-interactive</span>
+              </>
+            )}
           </div>
         ) : null}
 

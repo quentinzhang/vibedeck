@@ -1,7 +1,9 @@
 {
-  "name": "unified-prd-hub",
-  "private": true,
+  "name": "rushdeck",
+  "private": false,
+  "description": "Local-first Kanban hub with OpenClaw skills, visual board, CLI workflows, and coding-agent dispatch automation.",
   "version": "0.0.0",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "prd": "./bin/prd.mjs"
@@ -13,9 +15,14 @@
     "test": "node --test tests",
     "prd:init": "node scripts/prd_cards.mjs init --hub .",
     "prd:project:new": "node scripts/prd_cards.mjs project:new --hub .",
+    "prd:project:map:add": "node scripts/prd_cards.mjs project:map:add --hub .",
+    "prd:project:map:list": "node scripts/prd_cards.mjs project:map:list --hub .",
     "prd:new": "node scripts/prd_cards.mjs new --hub .",
     "prd:move": "node scripts/prd_cards.mjs move --hub .",
     "prd:sync": "node scripts/prd-sync.mjs",
+    "prd:roll:dispatch": "node scripts/prd-autopilot/prd_autopilot.mjs dispatch",
+    "prd:roll:reconcile": "node scripts/prd-autopilot/prd_autopilot.mjs reconcile",
+    "prd:roll:tick": "node scripts/prd-autopilot/prd_autopilot.mjs tick",
     "prd:autopilot:dispatch": "node scripts/prd-autopilot/prd_autopilot.mjs dispatch",
     "prd:autopilot:reconcile": "node scripts/prd-autopilot/prd_autopilot.mjs reconcile",
     "prd:autopilot:tick": "node scripts/prd-autopilot/prd_autopilot.mjs tick"
@@ -32,5 +39,8 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -35,6 +35,12 @@ function looksLikeAbsolutePath(p) {
   return /^[A-Za-z]:[\\/]/.test(raw);
 }
 
+function normalizeRepoPath(p) {
+  const raw = String(p || '').trim();
+  if (!looksLikeAbsolutePath(raw)) return '';
+  return path.resolve(expandHome(raw));
+}
+
 export function parseAgentProjects(agentMarkdown) {
   const text = stripFrontmatter(agentMarkdown || '');
   const lines = text.split('\n');
@@ -47,11 +53,43 @@ export function parseAgentProjects(agentMarkdown) {
     let repoPath = m[2];
     const commentIdx = repoPath.indexOf(' #');
     if (commentIdx !== -1) repoPath = repoPath.slice(0, commentIdx);
-    repoPath = unquote(repoPath.trim());
-    if (!looksLikeAbsolutePath(repoPath)) continue;
-    projects.set(name, path.resolve(expandHome(repoPath)));
+    repoPath = normalizeRepoPath(unquote(repoPath.trim()));
+    if (!repoPath) continue;
+    projects.set(name, repoPath);
   }
 
   return projects;
+}
+
+export function parseProjectRegistry(raw) {
+  const projects = new Map();
+
+  if (!raw || typeof raw !== 'object') return projects;
+  const bucket = raw.projects;
+  if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) return projects;
+
+  for (const [name, meta] of Object.entries(bucket)) {
+    if (!/^[A-Za-z0-9_.-]+$/.test(String(name || '').trim())) continue;
+
+    let repoPath = '';
+    if (typeof meta === 'string') {
+      repoPath = normalizeRepoPath(meta);
+    } else if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+      repoPath = normalizeRepoPath(meta.repoPath || meta.repo_path || '');
+    }
+
+    if (!repoPath) continue;
+    projects.set(String(name), repoPath);
+  }
+
+  return projects;
+}
+
+export function serializeProjectRegistry(mapping) {
+  const projects = {};
+  for (const [name, repoPath] of Array.from(mapping.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    projects[name] = { repoPath };
+  }
+  return `${JSON.stringify({ projects }, null, 2)}\n`;
 }
 

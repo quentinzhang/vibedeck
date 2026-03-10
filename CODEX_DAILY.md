@@ -1,4 +1,4 @@
-# Codex Daily (PRD Hub)
+# Codex Daily (Rushdeck Kanban)
 
 1. Run hub sync to refresh `STATUS.md` + `public/status.json`
 2. Pick 1 `pending` card (by priority/due/impact) → move to `in-progress`

@@ -1,0 +1,43 @@
+{
+  "projects": {
+    "ConsoleX_backend": {
+      "repoPath": "/var/www/evals_api"
+    },
+    "ConsoleX_frontend": {
+      "repoPath": "/var/www/ConsoleOne"
+    },
+    "pitch_deck": {
+      "repoPath": "/var/www/consolex-ai-pitch-de"
+    },
+    "prd": {
+      "repoPath": "/var/www/prd"
+    },
+    "realtime-google": {
+      "repoPath": "/var/www/realtime-google"
+    },
+    "talkpal": {
+      "repoPath": "/var/www/realtime-google"
+    },
+    "test": {
+      "repoPath": "/var/www/prdtest"
+    },
+    "test4": {
+      "repoPath": "/var/www/test4"
+    },
+    "test5": {
+      "repoPath": ""
+    },
+    "teste": {
+      "repoPath": "/var/www/teste"
+    },
+    "toolsets": {
+      "repoPath": "/var/www/MCPList/backend"
+    },
+    "UnionLLM": {
+      "repoPath": "/var/www/UnionLLM"
+    },
+    "visualize_mermaid": {
+      "repoPath": "/var/www/visualize_mermaid"
+    }
+  }
+}

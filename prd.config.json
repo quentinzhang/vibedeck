@@ -1,8 +1,8 @@
 {
-  "hubRoot": "/var/www/prd",
+  "hubRoot": ".",
   "projectsDir": "projects",
   "autopilot": {
     "maxParallel": 2
   },
-  "editor": "cursor"
+  "editor": "code"
 }

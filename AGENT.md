@@ -1,19 +1,18 @@
-# PRD Hub Agent Guide (Codex)
+# Rushdeck Agent Guide (Codex)
 
 This file is intentionally short and **repo-native**. Codex should use it as the “how to operate PRD cards” reference for this hub.
 
-It also contains a **machine-parsed** Project → Repo mapping used by hub scripts (see the last section). Keep mapping lines in the form:
-
-- `<project>: <absolute_repo_path>`
-
-Avoid adding other plain-text lines that look like `name: /abs/path` outside the mapping section.
+Project → repo mappings are stored separately in `PROJECTS.json`.
+Do not put machine-parsed repo mappings in this file.
 
 ## Role
 
 This hub supports two ways of working:
 
 - **Manual:** a human (or agent) edits card files and code directly, then moves cards across statuses.
-- **Supervisor autopilot (recommended for agents):** the hub acts as a scheduler-only supervisor that dispatches isolated workers via `prd autopilot ...`.
+- **Supervisor roll (recommended for agents):** the hub acts as a scheduler-only supervisor that dispatches isolated workers via `prd roll ...`.
+
+Legacy note: `prd autopilot ...` remains supported as a compatibility alias.
 
 When operating as a supervisor, follow `.agents/skills/prd-supervisor/SKILL.md` and do not implement changes inside the hub repo.
 
@@ -59,14 +58,18 @@ If you are not running autopilot, follow this routine:
 6. Validate at least once (build/test or explicit manual steps) and record evidence in the card.
 7. Move to `in-review` (or `done`), update `Progress Log`, then run `npm run prd:sync` again.
 
-## Project → Repo mapping (machine-parsed)
+## Project Registry
 
-- realtime-google: /var/www/realtime-google
-- ConsoleX_frontend: /var/www/ConsoleOne
-- pitch_deck: /var/www/consolex-ai-pitch-de
-- UnionLLM: /var/www/UnionLLM
-- ConsoleX_backend: /var/www/evals_api
-- prd: /var/www/prd
-- toolsets: /var/www/MCPList/backend
-- test: /var/www/prdtest
-- talkpal: /var/www/realtime-google
+Machine-readable project metadata lives in `PROJECTS.json`.
+
+Use the CLI to manage mappings:
+
+- `prd project map add --hub . --project <name> --repo-path <absolute-path> --non-interactive`
+- `prd project map migrate --hub .`
+- `prd project map list --hub .`
+
+If `prd` is not available on your `PATH`, use `node ./bin/prd.mjs ...` instead.
+
+Compatibility note:
+
+- Legacy hubs may still carry repo mappings in `AGENT.md`, but new writes go to `PROJECTS.json`.

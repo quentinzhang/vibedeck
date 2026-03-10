@@ -30,6 +30,124 @@ function parseArgs(argv) {
   return { args, positionals };
 }
 
+function expandHome(p) {
+  const raw = String(p || '').trim();
+  if (!raw) return '';
+  if (raw === '~') return os.homedir();
+  if (raw.startsWith('~/') || raw.startsWith('~\\')) return path.join(os.homedir(), raw.slice(2));
+  return raw;
+}
+
+function looksLikePath(cmd) {
+  const raw = String(cmd || '').trim();
+  if (!raw) return false;
+  if (raw === '.' || raw === '..') return true;
+  if (raw.startsWith('./') || raw.startsWith('../')) return true;
+  if (raw.startsWith('~/') || raw.startsWith('~\\')) return true;
+  if (raw.startsWith('/') || raw.includes(path.sep)) return true;
+  return false;
+}
+
+function isExecutableFile(filePath) {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolveExecutableOnPath(name, dirs) {
+  const seen = new Set();
+  for (const rawDir of dirs) {
+    const dir = String(rawDir || '').trim();
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    const candidate = path.join(dir, name);
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return '';
+}
+
+function parseVersionTuple(name) {
+  const m = String(name || '').match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!m) return null;
+  const major = Number.parseInt(m[1] || '0', 10);
+  const minor = Number.parseInt(m[2] || '0', 10);
+  const patch = Number.parseInt(m[3] || '0', 10);
+  if (!Number.isFinite(major)) return null;
+  return [major, Number.isFinite(minor) ? minor : 0, Number.isFinite(patch) ? patch : 0];
+}
+
+function compareVersionTupleDesc(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    const delta = (b[i] || 0) - (a[i] || 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+function resolveCodexCmd(rawCmd, { env } = {}) {
+  const cmd = String(rawCmd || '').trim() || 'codex';
+  const baseEnv = env && typeof env === 'object' ? env : process.env;
+
+  if (looksLikePath(cmd)) {
+    const expanded = expandHome(cmd);
+    if (isExecutableFile(expanded)) return { cmd: expanded, note: 'explicit path' };
+    return { cmd, note: 'explicit path (missing or not executable)' };
+  }
+
+  const envPath = String(baseEnv.PATH || '');
+  const envDirs = envPath ? envPath.split(path.delimiter) : [];
+  const commonDirs = [
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/local/sbin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ];
+
+  const onPath = resolveExecutableOnPath(cmd, [...envDirs, ...commonDirs]);
+  if (onPath) return { cmd: onPath, note: 'resolved on PATH' };
+
+  const home = os.homedir();
+  if (home) {
+    const known = [
+      { note: 'volta', p: path.join(home, '.volta', 'bin', cmd) },
+      { note: 'asdf', p: path.join(home, '.asdf', 'shims', cmd) },
+      { note: 'yarn', p: path.join(home, '.yarn', 'bin', cmd) },
+      { note: 'pnpm (mac)', p: path.join(home, 'Library', 'pnpm', cmd) },
+      { note: 'pnpm (linux)', p: path.join(home, '.local', 'share', 'pnpm', cmd) },
+    ];
+    for (const item of known) {
+      if (isExecutableFile(item.p)) return { cmd: item.p, note: `resolved via ${item.note}` };
+    }
+
+    // NVM keeps per-node-version bins under ~/.nvm/versions/node/<ver>/bin.
+    const nvmRoot = path.join(home, '.nvm', 'versions', 'node');
+    try {
+      const entries = fs
+        .readdirSync(nvmRoot, { withFileTypes: true })
+        .filter((ent) => ent.isDirectory())
+        .map((ent) => ({ name: ent.name, ver: parseVersionTuple(ent.name) }))
+        .filter((ent) => ent.ver);
+
+      entries.sort((a, b) => compareVersionTupleDesc(a.ver, b.ver));
+      for (const ent of entries) {
+        const candidate = path.join(nvmRoot, ent.name, 'bin', cmd);
+        if (isExecutableFile(candidate)) return { cmd: candidate, note: `resolved via nvm (${ent.name})` };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return { cmd, note: 'unresolved (will rely on PATH at spawn time)' };
+}
+
 async function ensureDir(dirPath) {
   await fsp.mkdir(dirPath, { recursive: true });
 }
@@ -264,17 +382,23 @@ async function main() {
     logStream.write(`\n# codex invoke=${invoke} started_at=${new Date().toISOString()}\n`);
     logStream.write(`# env: ${openclawEnv.loaded ? 'loaded' : 'missing'} ${openclawEnv.path}\n`);
 
+    const resolvedCodex = resolveCodexCmd(codexCmd, { env: baseEnv });
+    const codexBin = resolvedCodex.cmd;
+    if (codexBin !== codexCmd) {
+      logStream.write(`# codex: ${codexCmd} (resolved: ${codexBin} — ${resolvedCodex.note})\n`);
+    }
+
     if (invoke === 'exec') {
       const codexArgs = ['exec', ...commonArgs];
       if (model) codexArgs.push('-m', model);
       if (toBool(args['skip-git-repo-check'])) codexArgs.push('--skip-git-repo-check');
       codexArgs.push('-C', workdir, '--output-schema', schemaPath, '--output-last-message', outPath, '-');
 
-      logStream.write(`# cmd: ${codexCmd} ${codexArgs.join(' ')}\n`);
+      logStream.write(`# cmd: ${codexBin} ${codexArgs.join(' ')}\n`);
 
-      const child = spawn(codexCmd, codexArgs, { stdio: ['pipe', 'pipe', 'pipe'], env: baseEnv });
+      const child = spawn(codexBin, codexArgs, { stdio: ['pipe', 'pipe', 'pipe'], env: baseEnv });
       child.on('error', (err) => {
-        const hint = `Failed to spawn codex. Fix: ensure codex is on PATH or pass --codex /absolute/path/to/codex. (${formatSpawnError(err)})`;
+        const hint = `Failed to spawn codex. Fix: ensure codex is on PATH or pass --codex /absolute/path/to/codex. (${formatSpawnError(err)}) PATH=${String(baseEnv.PATH || '')}`;
         finish(1, { reason: hint, ensureResultJson: blockedResult('Codex failed to start (spawn error)', [hint]) }).catch(
           () => {},
         );
@@ -300,13 +424,13 @@ async function main() {
     if (model) codexArgs.push('-m', model);
     codexArgs.push('-C', workdir, promptText);
     logStream.write(
-      `# cmd: ${codexCmd} ${[...commonArgs, ...(model ? ['-m', model] : []), '-C', workdir].join(' ')} <PROMPT:${promptPath} bytes=${Buffer.byteLength(promptText, 'utf8')}>\n`,
+      `# cmd: ${codexBin} ${[...commonArgs, ...(model ? ['-m', model] : []), '-C', workdir].join(' ')} <PROMPT:${promptPath} bytes=${Buffer.byteLength(promptText, 'utf8')}>\n`,
     );
     logStream.write(`# NOTE: interactive prompt mode may not exit automatically; attach via tmux if needed.\n`);
 
-    const child = spawn(codexCmd, codexArgs, { stdio: 'inherit', env: baseEnv, cwd: workdir });
+    const child = spawn(codexBin, codexArgs, { stdio: 'inherit', env: baseEnv, cwd: workdir });
     child.on('error', (err) => {
-      const hint = `Failed to spawn codex. Fix: ensure codex is on PATH or pass --codex /absolute/path/to/codex. (${formatSpawnError(err)})`;
+      const hint = `Failed to spawn codex. Fix: ensure codex is on PATH or pass --codex /absolute/path/to/codex. (${formatSpawnError(err)}) PATH=${String(baseEnv.PATH || '')}`;
       finish(1, { reason: hint, ensureResultJson: blockedResult('Codex failed to start (spawn error)', [hint]) }).catch(
         () => {},
       );

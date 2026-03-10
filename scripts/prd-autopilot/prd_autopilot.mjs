@@ -5,7 +5,7 @@ import process from 'node:process';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { parseAgentProjects } from '../lib/agentMapping.mjs';
+import { parseAgentProjects, parseProjectRegistry } from '../lib/agentMapping.mjs';
 import { extractFrontmatter, parseFrontmatterFields } from '../lib/frontmatter.mjs';
 import { buildHubStatus } from '../lib/sync.mjs';
 
@@ -260,6 +260,16 @@ async function resetArtifactsForRun({ artifactRoot, runKey, tag, dryRun }) {
 }
 
 async function readAgentMapping(hubRoot) {
+  const registryPath = path.join(hubRoot, 'PROJECTS.json');
+  const registryText = await readText(registryPath).catch(() => '');
+  if (registryText) {
+    try {
+      return parseProjectRegistry(JSON.parse(registryText));
+    } catch {
+      // Fall back to AGENT.md for legacy hubs.
+    }
+  }
+
   const agentPath = path.join(hubRoot, 'AGENT.md');
   const text = await readText(agentPath).catch(() => '');
   return parseAgentProjects(text);
@@ -398,15 +408,8 @@ function buildWorkerPrompt({
 }) {
   const today = getToday();
   const invoke = String(codexInvoke || 'exec').trim();
+  const cardLabel = project ? `${cardId}@${project}` : `${cardId}`;
   return [
-    `${cardId}`,
-    `----`,
-    `You are a coding agent working on ONE PRD card.`,
-    ``,
-    `Required skill:`,
-    `- You MUST use the prd-worker skill for this run.`,
-    `- If you cannot access prd-worker, finish with outcome="blocked" and include a blocker: "prd-worker skill unavailable".`,
-    ``,
     `Card ID: ${cardId}`,
     `Project: ${project}`,
     `Repo: ${repoPath}`,
@@ -417,9 +420,15 @@ function buildWorkerPrompt({
     ...(logPath ? [`Worker log path: ${logPath}`] : []),
     `Date: ${today}`,
     `Started at: ${new Date().toISOString()}`,
+    `----`,
+    `You are a coding agent working on ONE PRD card.`,
+    ``,
+    `Required skill:`,
+    `- You MUST use the prd-worker skill for this run.`,
+    `- If you cannot access prd-worker, finish with outcome="blocked" and include a blocker: "prd-worker skill unavailable".`,
     ``,
     `Hard constraints:`,
-    `- Do NOT edit the PRD hub at ${hubRoot}. Treat it as read-only.`,
+    `- Do NOT edit the Rushdeck hub at ${hubRoot}. Treat it as read-only.`,
     `- Make code changes ONLY inside the repo worktree at: ${worktreePath}`,
     `- Writing to the supervisor-provided artifact paths (Result JSON path / Worker log path) is allowed (and required in prompt/TUI mode).`,
     `- Immediately before the FINAL JSON, output a short natural-language summary message (not JSON).`,
@@ -747,7 +756,7 @@ async function dispatchOnce({
 	        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
 	        await appendAutopilotNote(
 	          targetAbs,
-	          buildAutopilotBlockedNote({ title: 'Missing repo mapping in hub AGENT.md', blockers: [`project=${project}`] }),
+            buildAutopilotBlockedNote({ title: 'Missing repo mapping in hub PROJECTS.json', blockers: [`project=${project}`] }),
 	          { dryRun },
 	        );
 	        changed = true;
@@ -1159,12 +1168,16 @@ async function maybeSync({ hubRoot, enabled, dryRun }) {
 }
 
 function printHelp() {
-  console.log(`PRD Hub Autopilot (supervisor)
+  console.log(`Rushdeck Roll (supervisor)
 
 Usage:
   node scripts/prd-autopilot/prd_autopilot.mjs dispatch [options]
   node scripts/prd-autopilot/prd_autopilot.mjs reconcile [options]
   node scripts/prd-autopilot/prd_autopilot.mjs tick [options]
+
+Notes:
+  - Preferred CLI entrypoint: prd roll <dispatch|reconcile|tick>
+  - Legacy alias: prd autopilot <dispatch|reconcile|tick>
 
 Options:
   --hub <path>                 Hub root (default: repo root)

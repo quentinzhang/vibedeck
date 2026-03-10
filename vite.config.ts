@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { parseAgentProjects } from './scripts/lib/agentMapping.mjs';
+import { parseAgentProjects, parseProjectRegistry } from './scripts/lib/agentMapping.mjs';
 
 async function resolvePrdHubRoot(repoRoot: string) {
   const envRoot = String(process.env.PRD_HUB_ROOT || '').trim();
@@ -30,7 +30,8 @@ export default defineConfig(async () => {
   const internalPrdApi = () => {
     const repoRoot = prdHubRoot;
     const agentPath = path.join(repoRoot, 'AGENT.md');
-    let agentCache: { mtimeMs: number; mapping: Map<string, string> } | null = null;
+    const registryPath = path.join(repoRoot, 'PROJECTS.json');
+    let mappingCache: { key: string; mapping: Map<string, string> } | null = null;
 
     function isLocalRequest(req: any) {
       if (allowRemote) return true;
@@ -63,12 +64,27 @@ export default defineConfig(async () => {
     }
 
     async function getAgentMapping() {
-      const stat = await fs.stat(agentPath);
-      if (agentCache && agentCache.mtimeMs === stat.mtimeMs) return agentCache.mapping;
-      const text = await fs.readFile(agentPath, 'utf8');
-      const mapping = parseAgentProjects(text);
-      agentCache = { mtimeMs: stat.mtimeMs, mapping };
-      return mapping;
+      let cacheKey = '';
+
+      try {
+        const stat = await fs.stat(registryPath);
+        cacheKey = `registry:${stat.mtimeMs}`;
+        if (mappingCache && mappingCache.key === cacheKey) return mappingCache.mapping;
+
+        const text = await fs.readFile(registryPath, 'utf8');
+        const mapping = parseProjectRegistry(JSON.parse(text));
+        mappingCache = { key: cacheKey, mapping };
+        return mapping;
+      } catch {
+        const stat = await fs.stat(agentPath);
+        cacheKey = `agent:${stat.mtimeMs}`;
+        if (mappingCache && mappingCache.key === cacheKey) return mappingCache.mapping;
+
+        const text = await fs.readFile(agentPath, 'utf8');
+        const mapping = parseAgentProjects(text);
+        mappingCache = { key: cacheKey, mapping };
+        return mapping;
+      }
     }
 
     async function readLogText(filePath: string, { maxBytes }: { maxBytes: number }) {

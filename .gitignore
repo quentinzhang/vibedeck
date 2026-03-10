@@ -25,7 +25,9 @@ dist-ssr
 *.local
 .env
 .env.local
+.env.*
 .env.*.local
+!.env.example
 
 # Editor directories and files
 .vscode/*
@@ -48,7 +50,7 @@ coverage/
 .eslintcache
 .stylelintcache
 
-# PRD projects: keep local-only (do not track in git)
+# PRD projects: local workspace data
 projects/
 projects
 
@@ -56,8 +58,8 @@ projects
 !_templates/
 !_templates/**
 
-# public directory: ignore everything except screenshots
-public/*
+# Generated dashboard data
+public/status.json
 
 # Generated PRD board summary
 STATUS.md

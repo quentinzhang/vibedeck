@@ -28,10 +28,11 @@ export interface HubCard {
 }
 
 export interface HubWarning {
-  type: 'status_mismatch';
-  relPath: string;
-  frontmatterStatus: string;
-  folderStatus: string;
+  type: 'status_mismatch' | 'missing_repo_mapping';
+  relPath?: string;
+  frontmatterStatus?: string;
+  folderStatus?: string;
+  project?: string;
 }
 
 export interface ProjectSummary {

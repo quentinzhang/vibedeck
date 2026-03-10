@@ -16,9 +16,11 @@ test('buildHubStatus aggregates cards and counts per project', async () => {
   const repoRoot = tmp;
 
   await writeFileEnsureDir(
-    path.join(repoRoot, 'AGENT.md'),
-    `- p1: /var/www/p1\n- p2: /var/www/p2\n`,
+    path.join(repoRoot, 'PROJECTS.json'),
+    `${JSON.stringify({ projects: { p1: { repoPath: '/var/www/p1' }, p2: { repoPath: '/var/www/p2' } } }, null, 2)}\n`,
   );
+
+  await writeFileEnsureDir(path.join(repoRoot, 'AGENT.md'), '# guide\n');
 
   await writeFileEnsureDir(
     path.join(repoRoot, 'projects', 'p1', 'pending', 'BUG-0001-foo.md'),
@@ -52,4 +54,24 @@ test('buildHubStatus aggregates cards and counts per project', async () => {
   const c2 = status.cards.find((c) => c.project === 'p2');
   assert.ok(c2);
   assert.equal(c2.status, 'in-progress');
+});
+
+test('buildHubStatus warns when a project directory is missing a repo mapping', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-unmapped-'));
+
+  await writeFileEnsureDir(
+    path.join(tmp, 'PROJECTS.json'),
+    `${JSON.stringify({ projects: { mapped: { repoPath: '/var/www/mapped' } } }, null, 2)}\n`,
+  );
+  await writeFileEnsureDir(path.join(tmp, 'AGENT.md'), '# guide\n');
+  await writeFileEnsureDir(
+    path.join(tmp, 'projects', 'unmapped', 'pending', 'FEAT-0001-x.md'),
+    `---\nid: FEAT-0001\ntitle: "X"\ntype: feature\nstatus: pending\npriority: P2\ncomponent: ui\ncreated_at: 2026-02-02\nupdated_at: 2026-02-02\nspec: self\n---\n`,
+  );
+
+  const status = await buildHubStatus({ repoRoot: tmp });
+  const project = status.projects.find((p) => p.name === 'unmapped');
+  assert.ok(project);
+  assert.equal(project.repo_path, null);
+  assert.deepEqual(project.warnings, [{ type: 'missing_repo_mapping', project: 'unmapped' }]);
 });

@@ -9,24 +9,29 @@ import { fileURLToPath } from 'node:url';
 import { buildHubStatus } from '../scripts/lib/sync.mjs';
 
 function printHelp() {
-  console.log(`prd (Unified PRD Hub)
+  console.log(`prd (Rushdeck)
 
 Usage:
   prd project add [--hub <path>] [--project <name>] [--repo-path <abs>] [--non-interactive] [--no-sync]
   prd project new [--hub <path>] [--project <name>] [--repo-path <abs>] [--non-interactive] [--no-sync]   (alias of project add)
+  prd project map add [--hub <path>] --project <name> --repo-path <abs> [--non-interactive]
+  prd project map migrate [--hub <path>] [--from <agent-md>] [--overwrite]
+  prd project map list [--hub <path>] [--json]
   prd add [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--template full|lite] [--status pending|...] [--non-interactive] [--no-sync] [...]
   prd new [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--template full|lite] [--status pending|...] [--non-interactive] [--no-sync] [...]   (alias of add)
   prd create [--hub <path>] --project <name> [--type bug|feature|improvement] [--title \"...\"] [--template full|lite] [--status pending|...] [--non-interactive] [--no-sync] [...] (alias of add)
   prd move [--hub <path>] --relPath projects/<project>/<file>.md --to <status> [--no-sync]
   prd archive [--hub <path>] --relPath projects/<project>/<file>.md [--no-sync]
   prd list pending [--hub <path>] [--project <name>] [--json] [--sync]
-  prd autopilot <dispatch|reconcile|tick> [--hub <path>] [--project <name>] [--max-parallel <n>] [--runner tmux|process|command] [--runner-command <template>] [--tmux-prefix <p>] [--codex-invoke exec|prompt] [...]
+  prd roll <dispatch|reconcile|tick> [--hub <path>] [--project <name>] [--max-parallel <n>] [--runner tmux|process|command] [--runner-command <template>] [--tmux-prefix <p>] [--codex-invoke exec|prompt] [...]
+  prd autopilot <dispatch|reconcile|tick> [...]   (legacy alias of roll)
   prd sync [--hub <path>]
 
 Notes:
-  - Project → Repo mapping is read from: <hub>/AGENT.md (machine-parsed section)
+  - Project → Repo mapping is read from: <hub>/PROJECTS.json (legacy fallback: <hub>/AGENT.md)
   - Card template defaults to lite; pass --template full for the detailed template
   - This CLI wraps existing hub scripts under <hub>/scripts and <hub>/skills.
+  - 'roll' is the preferred supervisor command; 'autopilot' remains supported for compatibility.
 `);
 }
 
@@ -207,6 +212,39 @@ async function cmdProjectNew({ hubRoot, args }) {
   runNode(script, argv, { cwd: hubRoot });
 }
 
+async function cmdProjectMapAdd({ hubRoot, args }) {
+  const script = path.join(hubRoot, 'scripts', 'prd_cards.mjs');
+  const argv = [
+    'project:map:add',
+    '--hub',
+    hubRoot,
+    ...toNonInteractiveArgs(args),
+    ...forwardFlag(args, 'project'),
+    ...forwardFlag(args, 'repo-path', 'repo_path'),
+    ...forwardFlag(args, 'repo_path', 'repo_path'),
+  ];
+  runNode(script, argv, { cwd: hubRoot });
+}
+
+async function cmdProjectMapMigrate({ hubRoot, args }) {
+  const script = path.join(hubRoot, 'scripts', 'prd_cards.mjs');
+  const argv = [
+    'project:map:migrate',
+    '--hub',
+    hubRoot,
+    ...forwardFlag(args, 'from'),
+    ...forwardFlag(args, 'source'),
+    ...forwardFlag(args, 'overwrite'),
+  ];
+  runNode(script, argv, { cwd: hubRoot });
+}
+
+async function cmdProjectMapList({ hubRoot, args }) {
+  const script = path.join(hubRoot, 'scripts', 'prd_cards.mjs');
+  const argv = ['project:map:list', '--hub', hubRoot, ...forwardFlag(args, 'json')];
+  runNode(script, argv, { cwd: hubRoot });
+}
+
 async function cmdProjectList({ hubRoot, args }) {
   const script = path.join(hubRoot, 'scripts', 'prd_cards.mjs');
   const argv = [
@@ -298,7 +336,7 @@ async function main() {
   const hubRoot = await resolveHubRoot(args);
   const shouldAutoSync = args.sync !== false;
 
-  if (cmd1 === 'autopilot') {
+  if (cmd1 === 'roll' || cmd1 === 'autopilot') {
     const sub =
       cmd2 === 'dispatch' || cmd2 === 'reconcile' || cmd2 === 'tick' || cmd2 === 'help' ? cmd2 : 'tick';
     const forwarded = sub === cmd2 ? rest : [cmd2, ...rest].filter(Boolean);
@@ -313,6 +351,21 @@ async function main() {
   if (cmd1 === 'project' && (cmd2 === 'add' || cmd2 === 'new')) {
     await cmdProjectNew({ hubRoot, args });
     if (shouldAutoSync) await cmdSync({ hubRoot });
+    return;
+  }
+
+  if (cmd1 === 'project' && cmd2 === 'map' && cmd3 === 'add') {
+    await cmdProjectMapAdd({ hubRoot, args });
+    return;
+  }
+
+  if (cmd1 === 'project' && cmd2 === 'map' && cmd3 === 'migrate') {
+    await cmdProjectMapMigrate({ hubRoot, args });
+    return;
+  }
+
+  if (cmd1 === 'project' && cmd2 === 'map' && cmd3 === 'list') {
+    await cmdProjectMapList({ hubRoot, args });
     return;
   }
 

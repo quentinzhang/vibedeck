@@ -7,6 +7,7 @@ import process from 'node:process';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
+import { parseAgentProjects, parseProjectRegistry, serializeProjectRegistry } from './lib/agentMapping.mjs';
 import { resolveHubRoot } from './lib/hubRoot.mjs';
 
 const STATUS_DIRS = /** @type {const} */ ([
@@ -231,26 +232,6 @@ function looksLikeAbsolutePath(p) {
   return /^[A-Za-z]:[\\/]/.test(raw);
 }
 
-function parseAgentProjects(agentMarkdown) {
-  const text = String(agentMarkdown || '');
-  const lines = text.split('\n');
-  const projects = new Map();
-
-  for (const line of lines) {
-    const m = line.match(/^\s*(?:-\s*)?([A-Za-z0-9_.-]+)\s*:\s*(.+?)\s*$/);
-    if (!m) continue;
-    const name = m[1];
-    let repoPath = m[2];
-    const commentIdx = repoPath.indexOf(' #');
-    if (commentIdx !== -1) repoPath = repoPath.slice(0, commentIdx);
-    repoPath = unquote(repoPath.trim());
-    if (!looksLikeAbsolutePath(repoPath)) continue;
-    projects.set(name, path.resolve(expandHome(repoPath)));
-  }
-
-  return projects;
-}
-
 function normalizeComparePath(p) {
   const resolved = path.resolve(expandHome(p));
   if (process.platform === 'win32') return resolved.toLowerCase();
@@ -285,12 +266,7 @@ async function resolveProjectName({ hubRoot, repoRoot, projectName }) {
   if (!repoRoot) throw new Error('Missing --repo or --project');
   const repo = path.resolve(repoRoot);
 
-  const agentPath = path.join(prdHub, 'AGENT.md');
-  if (!(await fileExists(agentPath))) {
-    throw new Error(`Missing hub mapping file: ${agentPath}`);
-  }
-  const mappingText = await fs.readFile(agentPath, 'utf8');
-  const projects = parseAgentProjects(mappingText);
+  const projects = await readProjectMapping(prdHub);
 
   const repoResolved = normalizeComparePath(repo);
   const repoReal = await fs.realpath(repo).catch(() => repoResolved);
@@ -308,11 +284,42 @@ async function resolveProjectName({ hubRoot, repoRoot, projectName }) {
   throw new Error(
     [
       `No project mapping found for repo: ${repoResolved}`,
-      `Add a line to: ${agentPath}`,
+      `Add a mapping in: ${path.join(prdHub, 'PROJECTS.json')}`,
       ``,
-      `- ${suggestedName}: ${repoResolved}`,
+      `prd project map add --hub ${prdHub} --project ${suggestedName} --repo-path ${repoResolved}`,
     ].join('\n'),
   );
+}
+
+async function readProjectMapping(hubRoot) {
+  const registryPath = path.join(hubRoot, 'PROJECTS.json');
+  if (await fileExists(registryPath)) {
+    const raw = await fs.readFile(registryPath, 'utf8').catch(() => '');
+    if (raw) {
+      try {
+        return parseProjectRegistry(JSON.parse(raw));
+      } catch {
+        // Fall through to AGENT.md legacy mapping.
+      }
+    }
+  }
+
+  const agentPath = path.join(hubRoot, 'AGENT.md');
+  if (!(await fileExists(agentPath))) return new Map();
+  const mappingText = await fs.readFile(agentPath, 'utf8');
+  return parseAgentProjects(mappingText);
+}
+
+async function readLegacyAgentMapping(hubRoot, sourcePath = '') {
+  const agentPath = sourcePath ? path.resolve(String(sourcePath)) : path.join(hubRoot, 'AGENT.md');
+  if (!(await fileExists(agentPath))) return new Map();
+  const mappingText = await fs.readFile(agentPath, 'utf8');
+  return parseAgentProjects(mappingText);
+}
+
+async function writeProjectRegistry(hubRoot, mapping) {
+  const registryPath = path.join(hubRoot, 'PROJECTS.json');
+  await fs.writeFile(registryPath, serializeProjectRegistry(mapping), 'utf8');
 }
 
 function validateProjectName(name) {
@@ -633,15 +640,22 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
   await ensureDir(path.join(hub, '_templates'));
 
   await copyOrWrite({
+    srcPaths: [],
+    destPath: path.join(hub, 'PROJECTS.json'),
+    fallbackContent: '{\n  "projects": {}\n}\n',
+    force,
+  });
+
+  await copyOrWrite({
     srcPaths: [path.join(assetsRoot, 'AGENT.md'), path.join(legacyAssetsRoot, 'AGENT.md'), path.join(repoRoot, 'AGENT.md')],
     destPath: path.join(hub, 'AGENT.md'),
-    fallbackContent: '# Project → Repo mapping\n\n- example: ~/example\n',
+    fallbackContent: '# Rushdeck Agent Guide\n\nProject mappings live in PROJECTS.json.\n',
     force,
   });
   await copyOrWrite({
     srcPaths: [path.join(assetsRoot, 'README.md'), path.join(legacyAssetsRoot, 'README.md'), path.join(repoRoot, 'README.md')],
     destPath: path.join(hub, 'README.md'),
-    fallbackContent: '# PRD Hub\n',
+    fallbackContent: '# Rushdeck\n',
     force,
   });
   await copyOrWrite({
@@ -761,9 +775,7 @@ async function cmdProjectNew(args) {
 
     await ensureProjectLayout({ hubRoot, projectName });
 
-    const agentPath = path.join(hubRoot, 'AGENT.md');
-    const mappingText = (await fileExists(agentPath)) ? await fs.readFile(agentPath, 'utf8') : '';
-    const projects = parseAgentProjects(mappingText);
+    const projects = await readProjectMapping(hubRoot);
 
     if (projects.has(projectName)) {
       const existing = String(projects.get(projectName) || '').trim();
@@ -780,25 +792,19 @@ async function cmdProjectNew(args) {
     }
 
     let repoPath = String(args.repo_path || '').trim();
-    if (!repoPath) {
-      if (isNonInteractive(args)) throw new Error('Missing --repo_path (non-interactive)');
-      repoPath = String(
-        await promptText({
-          rl: getRl(),
-          question: 'Repo absolute path for mapping (AGENT.md)',
-          def: `~/${projectName}`,
-        }),
-      ).trim();
+    if (!repoPath && !isNonInteractive(args)) {
+      repoPath = String(await promptText({ rl: getRl(), question: 'Local repository absolute path (optional)' }) || '').trim();
     }
-    if (!looksLikeAbsolutePath(repoPath)) throw new Error('Invalid --repo_path (must be absolute)');
 
-    const existingText = (await fileExists(agentPath)) ? await fs.readFile(agentPath, 'utf8') : '';
-    if (existingText && !existingText.endsWith('\n')) {
-      await fs.appendFile(agentPath, '\n', 'utf8');
+    if (repoPath) {
+      if (!looksLikeAbsolutePath(repoPath)) throw new Error('Invalid --repo_path (must be absolute)');
+      projects.set(projectName, path.resolve(expandHome(repoPath)));
+      await writeProjectRegistry(hubRoot, projects);
+      console.log(`Added mapping: ${projectName} -> ${repoPath}`);
+    } else {
+      projects.set(projectName, ""); // Save the project even without a repo mapping
+      await writeProjectRegistry(hubRoot, projects);
     }
-    const line = `- ${projectName}: ${repoPath}\n`;
-    await fs.appendFile(agentPath, line, 'utf8');
-    console.log(`Added mapping: ${projectName} -> ${repoPath}`);
     console.log(`Project ready: ${projectName}`);
   } finally {
     rl?.close();
@@ -813,10 +819,7 @@ async function cmdProjectList(args) {
     scriptPath: fileURLToPath(import.meta.url),
   });
 
-  const agentPath = path.join(hubRoot, 'AGENT.md');
-  if (!(await fileExists(agentPath))) throw new Error(`Missing hub mapping file: ${agentPath}`);
-  const mappingText = await fs.readFile(agentPath, 'utf8');
-  const projects = parseAgentProjects(mappingText);
+  const projects = await readProjectMapping(hubRoot);
 
   const items = Array.from(projects.entries())
     .map(([project, repoPath]) => ({ project, repo_path: repoPath }))
@@ -833,6 +836,81 @@ async function cmdProjectList(args) {
   }
 
   process.stdout.write(`${items.map((i) => `- ${i.project}: ${i.repo_path}`).join('\n')}\n`);
+}
+
+async function cmdProjectMapAdd(args) {
+  const hubRoot = await resolveHubRoot({
+    hubArg: args.hub,
+    env: process.env,
+    cwd: process.cwd(),
+    scriptPath: fileURLToPath(import.meta.url),
+  });
+
+  await ensureHubLayout({ hubRoot, force: false });
+
+  const projectName = validateProjectName(args.project ? String(args.project) : '');
+  if (!projectName) throw new Error('Missing/invalid --project');
+
+  const repoPath = String(args.repo_path || '').trim();
+  if (!looksLikeAbsolutePath(repoPath)) throw new Error('Invalid --repo_path (must be absolute)');
+
+  const mapping = await readProjectMapping(hubRoot);
+  mapping.set(projectName, path.resolve(expandHome(repoPath)));
+  await writeProjectRegistry(hubRoot, mapping);
+  console.log(`Added mapping: ${projectName} -> ${repoPath}`);
+}
+
+async function cmdProjectMapMigrate(args) {
+  const hubRoot = await resolveHubRoot({
+    hubArg: args.hub,
+    env: process.env,
+    cwd: process.cwd(),
+    scriptPath: fileURLToPath(import.meta.url),
+  });
+
+  await ensureHubLayout({ hubRoot, force: false });
+
+  const sourcePath = String(args.from || args.source || '').trim();
+  const overwrite = args.overwrite === true;
+
+  const current = await readProjectMapping(hubRoot);
+  const legacy = await readLegacyAgentMapping(hubRoot, sourcePath);
+
+  if (legacy.size === 0) {
+    console.log('No legacy mappings found to migrate.');
+    return;
+  }
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const [projectName, repoPath] of legacy.entries()) {
+    const existing = current.get(projectName);
+    if (!existing) {
+      current.set(projectName, repoPath);
+      added += 1;
+      continue;
+    }
+    if (existing === repoPath) {
+      skipped += 1;
+      continue;
+    }
+    if (overwrite) {
+      current.set(projectName, repoPath);
+      updated += 1;
+      continue;
+    }
+    skipped += 1;
+  }
+
+  await writeProjectRegistry(hubRoot, current);
+  console.log(`Migrated mappings from ${sourcePath || path.join(hubRoot, 'AGENT.md')}`);
+  console.log(`Added: ${added}, Updated: ${updated}, Skipped: ${skipped}`);
+}
+
+async function cmdProjectMapList(args) {
+  return cmdProjectList(args);
 }
 
 async function cmdNew(args) {
@@ -1047,9 +1125,14 @@ async function cmdValidate(args) {
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
     .filter((name) => name && !name.startsWith('.') && !name.startsWith('_'));
+  const mapping = await readProjectMapping(hubRoot);
 
   const problems = [];
   for (const project of projects) {
+    if (!mapping.has(project)) {
+      problems.push(`[${project}] missing repo mapping in ${path.join(hubRoot, 'PROJECTS.json')}`);
+    }
+
     const projectRoot = path.join(projectsRoot, project);
     /** @type {Map<string, string>} */
     const seenIds = new Map();
@@ -1161,7 +1244,7 @@ async function cmdMove(args) {
 }
 
 function printHelp() {
-  console.log(`PRD Hub helper (multi-project)
+  console.log(`Rushdeck helper (multi-project)
 
 Usage:
   node scripts/prd_cards.mjs init [--hub <path>] [--project <name>] [--force]
@@ -1169,18 +1252,21 @@ Usage:
   node scripts/prd_cards.mjs create --type bug|feature|improvement --title "..." [options]   (alias of new)
   node scripts/prd_cards.mjs project:new [--hub <path>] [--project <name>] [--repo_path <abs>] [--non_interactive]
   node scripts/prd_cards.mjs project:list [--hub <path>] [--json]
+  node scripts/prd_cards.mjs project:map:add [--hub <path>] --project <name> --repo_path <abs>
+  node scripts/prd_cards.mjs project:map:migrate [--hub <path>] [--from <agent-md>] [--overwrite]
+  node scripts/prd_cards.mjs project:map:list [--hub <path>] [--json]
   node scripts/prd_cards.mjs move --relPath projects/<project>/<file>.md --to <status> [--sync]
   node scripts/prd_cards.mjs sync [--hub <path>]
   node scripts/prd_cards.mjs validate [--hub <path>]
 
 Common:
-  --hub <path>        PRD hub root (default: auto-detected; override with $PRD_HUB_ROOT or ~/.codex/prd-hub.json)
+  --hub <path>        Rushdeck root (default: auto-detected; override with $PRD_HUB_ROOT or ~/.codex/prd-hub.json)
   --help
   --non_interactive   fail instead of prompting (also enabled when CI=1/true)
 
 new options:
   --project <name>    required; when omitted, prompts to select from <hub>/projects/
-  --repo <path>       optional; if set and mapped in <hub>/AGENT.md, used as default selection
+  --repo <path>       optional; if set and mapped in <hub>/PROJECTS.json, used as default selection
   --template full|lite|<path>  card body template (default: lite)
   --status drafts|pending|in-progress|in-review|blocked|done|archived
   --priority P0|P1|P2|P3
@@ -1222,6 +1308,18 @@ async function main() {
   }
   if (command === 'project:list') {
     await cmdProjectList(args);
+    return;
+  }
+  if (command === 'project:map:add') {
+    await cmdProjectMapAdd(args);
+    return;
+  }
+  if (command === 'project:map:migrate') {
+    await cmdProjectMapMigrate(args);
+    return;
+  }
+  if (command === 'project:map:list') {
+    await cmdProjectMapList(args);
     return;
   }
   if (command === 'new') {

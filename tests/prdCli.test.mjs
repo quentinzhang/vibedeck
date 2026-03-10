@@ -22,6 +22,13 @@ async function read(p) {
   return fs.readFile(p, 'utf8');
 }
 
+async function setupTempCliRepo(root) {
+  await mkdirp(path.join(root, 'bin'));
+  await fs.copyFile(path.join(process.cwd(), 'bin', 'prd.mjs'), path.join(root, 'bin', 'prd.mjs'));
+  await fs.symlink(path.join(process.cwd(), 'scripts'), path.join(root, 'scripts'), 'dir');
+  await fs.symlink(path.join(process.cwd(), 'skills'), path.join(root, 'skills'), 'dir');
+}
+
 test('prd CLI supports project new, project list, new, and list pending (with hub symlinked skills)', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-cli-'));
   const repoRoot = process.cwd();
@@ -221,6 +228,44 @@ test('prd CLI exposes roll as the preferred supervisor command and keeps autopil
 
   const autopilotHelpRes = spawnSync(process.execPath, [prdBin, 'autopilot', 'help'], { encoding: 'utf8' });
   assert.equal(autopilotHelpRes.status, 0, (autopilotHelpRes.stderr || '') + (autopilotHelpRes.stdout || ''));
+});
+
+test('prd roll reads autopilot defaults from prd.config.json and explicit flags override them', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-cli-roll-config-'));
+  await setupTempCliRepo(tmp);
+  await fs.writeFile(
+    path.join(tmp, 'prd.config.json'),
+    JSON.stringify(
+      {
+        hubRoot: '.',
+        autopilot: {
+          runner: 'bogus',
+          maxParallel: 7,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  await fs.writeFile(path.join(tmp, 'AGENT.md'), '# guide\n', 'utf8');
+  await fs.writeFile(path.join(tmp, 'PROJECTS.json'), '{"projects":{}}\n', 'utf8');
+  await mkdirp(path.join(tmp, 'projects'));
+
+  const prdBin = path.join(tmp, 'bin', 'prd.mjs');
+
+  const configDrivenRes = spawnSync(process.execPath, [prdBin, 'roll', 'dispatch'], {
+    cwd: tmp,
+    encoding: 'utf8',
+  });
+  assert.notEqual(configDrivenRes.status, 0);
+  assert.match((configDrivenRes.stderr || '') + (configDrivenRes.stdout || ''), /Invalid --runner: bogus/);
+
+  const cliOverrideRes = spawnSync(process.execPath, [prdBin, 'roll', 'dispatch', '--runner', 'process'], {
+    cwd: tmp,
+    encoding: 'utf8',
+  });
+  assert.equal(cliOverrideRes.status, 0, (cliOverrideRes.stderr || '') + (cliOverrideRes.stdout || ''));
 });
 
 test('prd CLI supports project map add and list', async () => {

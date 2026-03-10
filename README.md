@@ -36,7 +36,7 @@ Rushdeck is the result of that need: a local-first way to turn scattered ideas i
 - Git
 - Optional: `tmux` (recommended for `roll` with `--runner tmux`)
 
-## Prepare your environment:
+## Prepare Your Environment
 
 1. Install dependencies:
 
@@ -50,102 +50,194 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5566/` (or `http://localhost:5566/prd.html`).
+Open `http://localhost:5566/` or `http://localhost:5566/prd.html`.
 
 Examples below use `prd ...` for readability. If `prd` is not available on your `PATH`, replace it with `node ./bin/prd.mjs ...`.
 
-3. Install skills
+3. Install the two core skills:
 
-项目中有两个核心技能：
-- `prd-supervisor`: 负责与 OpenClaw 集成，通过对话调度和分发任务到 worker，使用时需要将其安装到OpenClaw的技能目录中
-- `prd-worker`: 负责与Claude code或Codex等 Coding Agent 集成，执行具体的开发任务，将其保留在当前位置即可
+- `prd-supervisor`: integrates Rushdeck with OpenClaw and handles scheduling plus task dispatch to workers. Install it into your OpenClaw skills directory when you want OpenClaw to drive the supervisor loop.
+- `prd-worker`: integrates Rushdeck with Coding Agents such as Codex or Claude Code to execute individual tasks. Keep this skill inside the Rushdeck repository.
 
-4. Initialize configs
+4. Initialize config defaults:
 
-Edit `prd.config.json` to set up your preferred defaults.
+- Edit `prd.config.json` to set up your preferred local defaults.
 
-## 需求卡的生命周期
-需求卡的状态由 frontmatter 中的 `status` 字段定义，状态包括：
-- `Drafts` (raw ideas, excluded from daily rotation, need manual review and move to `Pending` when ready)
-- `Pending` (ready for auto-dispatch; included in daily rotation)
-- `In Progress` (currently being worked on by coding agent)
-- `Blocked` (broken from execution loop because of missing spec/AC, external dependency, infra missing etc.)
-- `In Review` (under review, need human approve before move to `Done` or back to `Pending`)
-- `Done` (completed cards, can be moved to `Archived` for better organization)
-- `Archived` (archived cards, excluded from daily rotation)
+## Card Lifecycle
 
-## How to use
+Card state is defined by the `status` field in frontmatter. The supported statuses are:
+
+- `Drafts`: raw ideas, excluded from daily rotation, and moved to `Pending` only after manual review.
+- `Pending`: ready for auto-dispatch and included in daily rotation.
+- `In Progress`: currently being worked on by a coding agent.
+- `Blocked`: removed from the execution loop because of missing specification, missing acceptance criteria, external dependency, missing infrastructure, or another blocker.
+- `In Review`: waiting for human review before moving to `Done` or back to `Pending`.
+- `Done`: completed work that can later be archived.
+- `Archived`: archived cards, excluded from daily rotation.
+
+## Typical Workflow
 
 ### 1. Create a project
-- 可以使用终端的 PRD 命令 ```prd project add``` 交互式创建
-- 也可以使用自然语言交互进行创建，通过 OpenCloud 提需求。示例提示语：
-  ```
-  请帮我使用 Rushdeck 技能创建一个名字叫 <project> 的项目空间，对应的本地工作目录是 <workdir>，并且运行git init进行初始化。
-  ```
+
+- Use the terminal command `prd project add` for interactive project creation.
+- Or create a project through natural-language interaction with OpenClaw. Example prompt:
+
+```text
+Please use the Rushdeck skill to create a project named <project>, map it to the local working directory <workdir>, and run git init there.
+```
 
 ### 2. Create a card
-- 可以使用终端的 PRD 命令 ```prd add``` 交互式创建
-- 也可以使用自然语言交互进行创建，通过 OpenCloud 提需求。示例提示语：
-  ```
-  请帮我使用 Rushdeck 技能在 <project> 项目下创建一个新的需求卡，标题是 <title>，内容是 <content>，初始状态是 Draft。
-  ```
-### 3. Dispatch work to agents
-可以运行 ```prd roll tick``` 命令，将
 
-### 4. Reconcile results back
+- Use the terminal command `prd add` to create a new requirement card.
+- Or create a card through natural-language interaction with OpenClaw. Example prompt:
 
-### 5. Add cron jobs
+```text
+Please use the Rushdeck skill to create a new card in project <project> with title <title>, content <content>, and initial status Draft.
+```
+
+### 3. Dispatch work to coding agents
+
+Use `prd roll dispatch` to dispatch all eligible `Pending` cards. By default, Rushdeck launches workers with the `tmux` runner and uses `codex` as the coding agent command.
+
+```bash
+prd roll dispatch
+```
+
+### 4. Reconcile results back into the board
+
+Use `prd roll reconcile` to read finished worker results and update card status, notes, and logs in the board.
+
+```bash
+prd roll reconcile
+```
+
+### 5. Schedule the loop
+
+You can run dispatch and reconcile on a schedule with `cron` or `launchd`. Example:
+
+```bash
+# Dispatch every 30 minutes
+0,30 * * * * prd roll dispatch --max-parallel 2
+
+# Reconcile every 5 minutes
+*/5 * * * * prd roll reconcile
+```
 
 ## Core Commands
+
+### Card and project management
 
 ```bash
 prd help
 prd project map migrate --hub .
-prd sync --hub .
 prd project map list --hub .
 prd project list --hub .
 prd add --hub . --project <name> --template lite --title "Quick draft" --non-interactive
 prd move --hub . --relPath projects/<project>/<card>.md --to in-progress
 prd list pending --hub . --sync
+prd sync --hub .
 ```
 
-Preferred supervisor loop:
+### Supervisor loop
+
+Preferred loop:
 
 ```bash
 prd roll tick --hub . --project <name> --max-parallel 2
 ```
 
-This command is designed to be run manually or from a scheduler such as `cron` or `launchd` so Rushdeck can continuously pick ready cards, dispatch them to coding agents, and reconcile progress back into the board.
+`prd roll tick` runs one non-blocking supervisor cycle: it first reconciles finished workers, then dispatches ready cards up to the configured concurrency limit. Run it manually or from a scheduler such as `cron` or `launchd`.
 
-Legacy compatibility alias:
+### `prd roll tick` defaults
 
-```bash
-prd autopilot tick --hub . --project <name> --max-parallel 2
-```
+When you run `prd roll tick` without extra flags through `prd`, the current defaults are:
+
+- Hub root: auto-detected from `--hub`, `PRD_HUB_ROOT`, the current working tree, or `prd.config.json > hubRoot`
+- Project filter: empty, so the supervisor scans all projects
+- Max parallel workers: `2`
+- DoR gate: `loose`
+- Runner: `tmux`
+- tmux session prefix: `prd`
+- Worktree dir: `.worktrees`
+- Coding agent command: `codex`
+- Coding agent invocation: `codex exec` with `--codex-invoke exec`
+- Codex automation mode: `danger`
+- Codex model: not pinned by default, so the local `codex` CLI default is used unless `--model` is set
+- Sync after changes: `true`
+
+The default coding agent for `prd roll tick` is therefore the local `codex` CLI, launched in non-interactive `exec` mode. If there are no `pending` cards and nothing to reconcile, the command exits cleanly without dispatching a worker.
+
+### Runner modes
+
+`prd roll tick` supports three runner modes:
+
+| Runner | How it launches work | TTY support | Best fit | Main trade-off |
+| --- | --- | --- | --- | --- |
+| `tmux` | Starts one detached `tmux` session per card | Yes | Default local-first workflow, long-running workers, and interactive fallback | Requires `tmux` to be installed or `PRD_TMUX_BIN` to be set |
+| `process` | Spawns a detached background process directly | No | Headless automation when no terminal session is needed | Cannot support `--codex-invoke prompt`; less convenient to inspect live |
+| `command` | Runs a custom shell template via `--runner-command` | Depends on your template | Advanced integrations, wrapper scripts, remote launchers, or custom orchestrators | You must maintain and debug the launch template yourself |
+
+Recommended defaults:
+
+- Use `runner=tmux` for local development and scheduled supervisor ticks on a machine you control.
+- Use `runner=process` only for fully headless `codex exec` style runs.
+- Use `runner=command` only when you need a custom launcher such as a wrapper script, remote shell, or another agent runtime.
+
+Avoid pairing `--codex-invoke prompt` with `runner=process`: prompt mode needs a TTY, so `tmux` is the safest default.
 
 ## Configuration
 
 ### `prd.config.json`
 
-`prd.config.json` is optional and used by the CLI as a convenience default.
+`prd.config.json` is optional and used by the `prd` CLI wrapper as a convenience default source.
 
 ```json
 {
   "hubRoot": ".",
   "projectsDir": "projects",
   "autopilot": {
-    "maxParallel": 2
+    "maxParallel": 2,
+    "runner": "tmux",
+    "tmuxPrefix": "prd",
+    "codex": "codex",
+    "codexInvoke": "exec",
+    "codexMode": "danger",
+    "dor": "loose",
+    "sync": true
   },
   "editor": "code"
 }
 ```
 
+Current behavior:
+
+- `hubRoot` is used by the CLI when `--hub` and `PRD_HUB_ROOT` are not provided.
+- `autopilot.*` is used by `prd roll ...` when the corresponding flags are omitted.
+- Explicit CLI flags always win over `prd.config.json`.
+- Directly invoking `node scripts/prd-autopilot/prd_autopilot.mjs ...` does not read `prd.config.json`; config inheritance happens in `bin/prd.mjs`.
+
+Supported `autopilot` keys in `prd.config.json`:
+
+- `maxParallel`
+- `runner`
+- `runnerCommand`
+- `tmuxPrefix`
+- `worktreeDir`
+- `codex`
+- `codexInvoke`
+- `codexMode`
+- `model`
+- `base`
+- `dor`
+- `infraGraceHours`
+- `sync`
+
 ### Environment variables
 
-- `PRD_HUB_ROOT`: override hub root path
-- `PRD_DASHBOARD_EDITOR`: preferred editor command for card edit action
-- `PRD_DASHBOARD_ALLOW_REMOTE`: set to `true`/`1` to allow non-local dashboard API access
-- `PRD_TMUX_BIN`: absolute path to `tmux` if not discoverable from `PATH`
+- `PRD_HUB_ROOT`: override the hub root path
+- `PRD_DASHBOARD_EDITOR`: preferred editor command for the card edit action
+- `PRD_DASHBOARD_ALLOW_REMOTE`: set to `true` or `1` to allow non-local dashboard API access
+- `PRD_TMUX_BIN`: absolute path to `tmux` if it cannot be discovered from `PATH`
 
 ## Repository Layout
 
@@ -166,7 +258,7 @@ npm run test
 npm run prd:sync
 ```
 
-## Open-source defaults
+## Open-source Defaults
 
 - `projects/`, `STATUS.md`, and `public/status.json` are ignored by default to avoid leaking local project data
 - `PROJECTS.json` is the preferred mapping registry; add entries with `prd project map add`

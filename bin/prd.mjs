@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 import { buildHubStatus } from '../scripts/lib/sync.mjs';
 
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function printHelp() {
   console.log(`prd (Rushdeck)
 
@@ -30,6 +34,7 @@ Usage:
 Notes:
   - Project → Repo mapping is read from: <hub>/PROJECTS.json (legacy fallback: <hub>/AGENT.md)
   - Card template defaults to lite; pass --template full for the detailed template
+  - 'roll'/'autopilot' inherit missing defaults from prd.config.json > autopilot when invoked via this CLI wrapper
   - This CLI wraps existing hub scripts under <hub>/scripts and <hub>/skills.
   - 'roll' is the preferred supervisor command; 'autopilot' remains supported for compatibility.
 `);
@@ -111,23 +116,88 @@ function repoRootFromScript() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 }
 
-async function readHubRootFromPrdConfig({ repoRoot }) {
+async function readPrdConfig({ repoRoot }) {
   const configPath = path.join(repoRoot, 'prd.config.json');
-  if (!(await pathExists(configPath))) return '';
+  if (!(await pathExists(configPath))) return {};
 
   try {
     const raw = await fs.readFile(configPath, 'utf8');
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return '';
-    const value = String(parsed.hubRoot || parsed.hub_root || '').trim();
-    if (!value) return '';
-    const expanded = expandHomePath(value);
-    const resolved = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(repoRoot, expanded);
-    if (!(await looksLikeHubRoot(resolved))) return '';
-    return resolved;
+    return isPlainObject(parsed) ? parsed : {};
   } catch {
-    return '';
+    return {};
   }
+}
+
+function getNestedConfigValue(config, keys) {
+  let current = config;
+  for (const key of keys) {
+    if (!isPlainObject(current) || !(key in current)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function parseBooleanLike(value) {
+  if (value === true || value === false) return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
+function configValueAsCliToken(value, type = 'string') {
+  if (value === undefined || value === null) return undefined;
+  if (type === 'boolean') return parseBooleanLike(value);
+  const text = String(value).trim();
+  return text ? text : undefined;
+}
+
+function applyAutopilotConfigDefaults(args, config) {
+  const next = { ...args };
+  const mappings = [
+    { arg: 'max-parallel', type: 'string', paths: [['autopilot', 'maxParallel'], ['autopilot', 'max_parallel']] },
+    { arg: 'runner', type: 'string', paths: [['autopilot', 'runner']] },
+    { arg: 'runner-command', type: 'string', paths: [['autopilot', 'runnerCommand'], ['autopilot', 'runner_command']] },
+    { arg: 'tmux-prefix', type: 'string', paths: [['autopilot', 'tmuxPrefix'], ['autopilot', 'tmux_prefix']] },
+    { arg: 'worktree-dir', type: 'string', paths: [['autopilot', 'worktreeDir'], ['autopilot', 'worktree_dir']] },
+    { arg: 'codex', type: 'string', paths: [['autopilot', 'codex']] },
+    { arg: 'codex-invoke', type: 'string', paths: [['autopilot', 'codexInvoke'], ['autopilot', 'codex_invoke']] },
+    { arg: 'codex-mode', type: 'string', paths: [['autopilot', 'codexMode'], ['autopilot', 'codex_mode']] },
+    { arg: 'model', type: 'string', paths: [['autopilot', 'model']] },
+    { arg: 'base', type: 'string', paths: [['autopilot', 'base']] },
+    { arg: 'dor', type: 'string', paths: [['autopilot', 'dor']] },
+    {
+      arg: 'infra-grace-hours',
+      type: 'string',
+      paths: [['autopilot', 'infraGraceHours'], ['autopilot', 'infra_grace_hours']],
+    },
+    { arg: 'sync', type: 'boolean', paths: [['autopilot', 'sync']] },
+  ];
+
+  for (const mapping of mappings) {
+    if (next[mapping.arg] !== undefined) continue;
+    for (const keys of mapping.paths) {
+      const resolved = configValueAsCliToken(getNestedConfigValue(config, keys), mapping.type);
+      if (resolved !== undefined) {
+        next[mapping.arg] = resolved;
+        break;
+      }
+    }
+  }
+
+  return next;
+}
+
+async function readHubRootFromPrdConfig({ repoRoot }) {
+  const parsed = await readPrdConfig({ repoRoot });
+  const value = String(parsed.hubRoot || parsed.hub_root || '').trim();
+  if (!value) return '';
+  const expanded = expandHomePath(value);
+  const resolved = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(repoRoot, expanded);
+  if (!(await looksLikeHubRoot(resolved))) return '';
+  return resolved;
 }
 
 async function resolveHubRoot(args) {
@@ -334,16 +404,19 @@ async function main() {
   }
 
   const hubRoot = await resolveHubRoot(args);
+  const repoRoot = repoRootFromScript();
+  const prdConfig = await readPrdConfig({ repoRoot });
   const shouldAutoSync = args.sync !== false;
 
   if (cmd1 === 'roll' || cmd1 === 'autopilot') {
+    const rollArgs = applyAutopilotConfigDefaults(args, prdConfig);
     const sub =
       cmd2 === 'dispatch' || cmd2 === 'reconcile' || cmd2 === 'tick' || cmd2 === 'help' ? cmd2 : 'tick';
     const forwarded = sub === cmd2 ? rest : [cmd2, ...rest].filter(Boolean);
     const script = path.join(hubRoot, 'scripts', 'prd-autopilot', 'prd_autopilot.mjs');
     const autopilotArgs = ['--hub', hubRoot];
-    if (args.sync === false) autopilotArgs.push('--sync', 'false');
-    runNode(script, [sub, ...autopilotArgs, ...forwardArgsExcept(args, ['hub', 'help', 'json', 'sync']), ...forwarded], { cwd: hubRoot });
+    if (rollArgs.sync === false) autopilotArgs.push('--sync', 'false');
+    runNode(script, [sub, ...autopilotArgs, ...forwardArgsExcept(rollArgs, ['hub', 'help', 'json', 'sync']), ...forwarded], { cwd: hubRoot });
     // autopilot handles syncing itself via --sync; do not double-sync here.
     return;
   }

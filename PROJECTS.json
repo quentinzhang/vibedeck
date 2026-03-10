@@ -9,26 +9,14 @@
     "pitch_deck": {
       "repoPath": "/var/www/consolex-ai-pitch-de"
     },
-    "prd": {
-      "repoPath": "/var/www/prd"
-    },
     "realtime-google": {
       "repoPath": "/var/www/realtime-google"
     },
+    "rushdeck": {
+      "repoPath": "/var/www/RushDeck"
+    },
     "talkpal": {
       "repoPath": "/var/www/realtime-google"
-    },
-    "test": {
-      "repoPath": "/var/www/prdtest"
-    },
-    "test4": {
-      "repoPath": "/var/www/test4"
-    },
-    "test5": {
-      "repoPath": ""
-    },
-    "teste": {
-      "repoPath": "/var/www/teste"
     },
     "toolsets": {
       "repoPath": "/var/www/MCPList/backend"

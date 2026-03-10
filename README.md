@@ -44,7 +44,15 @@ Rushdeck is the result of that need: a local-first way to turn scattered ideas i
 npm install
 ```
 
-2. Start the Kanban dashboard:
+2. Run an initial sync before opening the Kanban dashboard:
+
+```bash
+prd sync --hub .
+```
+
+If `prd` is not available on your `PATH`, replace it with `node ./bin/prd.mjs ...`.
+
+3. Start the Kanban dashboard:
 
 ```bash
 npm run dev
@@ -52,14 +60,14 @@ npm run dev
 
 Open `http://localhost:5566/` or `http://localhost:5566/prd.html`.
 
-Examples below use `prd ...` for readability. If `prd` is not available on your `PATH`, replace it with `node ./bin/prd.mjs ...`.
+Examples below use `prd ...` for readability.
 
-3. Install the two core skills:
+4. Install the two core skills:
 
 - `prd-supervisor`: integrates Rushdeck with OpenClaw and handles scheduling plus task dispatch to workers. Install it into your OpenClaw skills directory when you want OpenClaw to drive the supervisor loop.
 - `prd-worker`: integrates Rushdeck with Coding Agents such as Codex or Claude Code to execute individual tasks. Keep this skill inside the Rushdeck repository.
 
-4. Initialize config defaults:
+5. Initialize config defaults:
 
 - Edit `prd.config.json` to set up your preferred local defaults.
 

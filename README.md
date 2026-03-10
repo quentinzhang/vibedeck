@@ -36,7 +36,7 @@ Rushdeck is the result of that need: a local-first way to turn scattered ideas i
 - Git
 - Optional: `tmux` (recommended for `roll` with `--runner tmux`)
 
-## Prepare Your Environment
+## Getting Started
 
 1. Install dependencies:
 

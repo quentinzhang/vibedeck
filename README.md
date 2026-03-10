@@ -36,7 +36,7 @@ Rushdeck is the result of that need: a local-first way to turn scattered ideas i
 - Git
 - Optional: `tmux` (recommended for `roll` with `--runner tmux`)
 
-## Quick Start
+## Prepare your environment:
 
 1. Install dependencies:
 
@@ -54,9 +54,47 @@ Open `http://localhost:5566/` (or `http://localhost:5566/prd.html`).
 
 Examples below use `prd ...` for readability. If `prd` is not available on your `PATH`, replace it with `node ./bin/prd.mjs ...`.
 
-3. Initialize skills
+3. Install skills
 
 项目中有两个核心技能：
+- `prd-supervisor`: 负责与 OpenClaw 集成，通过对话调度和分发任务到 worker，使用时需要将其安装到OpenClaw的技能目录中
+- `prd-worker`: 负责与Claude code或Codex等 Coding Agent 集成，执行具体的开发任务，将其保留在当前位置即可
+
+4. Initialize configs
+
+Edit `prd.config.json` to set up your preferred defaults.
+
+## 需求卡的生命周期
+需求卡的状态由 frontmatter 中的 `status` 字段定义，状态包括：
+- `Drafts` (raw ideas, excluded from daily rotation, need manual review and move to `Pending` when ready)
+- `Pending` (ready for auto-dispatch; included in daily rotation)
+- `In Progress` (currently being worked on by coding agent)
+- `Blocked` (broken from execution loop because of missing spec/AC, external dependency, infra missing etc.)
+- `In Review` (under review, need human approve before move to `Done` or back to `Pending`)
+- `Done` (completed cards, can be moved to `Archived` for better organization)
+- `Archived` (archived cards, excluded from daily rotation)
+
+## How to use
+
+### 1. Create a project
+- 可以使用终端的 PRD 命令 ```prd project add``` 交互式创建
+- 也可以使用自然语言交互进行创建，通过 OpenCloud 提需求。示例提示语：
+  ```
+  请帮我使用 Rushdeck 技能创建一个名字叫 <project> 的项目空间，对应的本地工作目录是 <workdir>，并且运行git init进行初始化。
+  ```
+
+### 2. Create a card
+- 可以使用终端的 PRD 命令 ```prd add``` 交互式创建
+- 也可以使用自然语言交互进行创建，通过 OpenCloud 提需求。示例提示语：
+  ```
+  请帮我使用 Rushdeck 技能在 <project> 项目下创建一个新的需求卡，标题是 <title>，内容是 <content>，初始状态是 Draft。
+  ```
+### 3. Dispatch work to agents
+可以运行 ```prd roll tick``` 命令，将
+
+### 4. Reconcile results back
+
+### 5. Add cron jobs
 
 ## Core Commands
 

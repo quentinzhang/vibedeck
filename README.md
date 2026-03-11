@@ -2,39 +2,74 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-VibeDeck is a lightweight local-first Kanban hub for personal developer workflows. It combines Markdown requirement cards, a visual board, terminal-first operations, OpenClaw-powered card creation, and automated dispatch to coding agents so you can run a lightweight Vibe Coding loop across one or more projects.
+VibeDeck is a local-first Kanban hub built for personal developer workflows. It combines Markdown requirement cards, a visual board, terminal-first operations, OpenClaw-powered natural-language card creation, and automated dispatch to coding agents so you can run a lightweight Vibe Coding workflow across one or more projects.
 
 ## Why I Built VibeDeck
 
-As an independent developer, I need to manage multiple projects at the same time. I want to be able to capture new requirements whenever they appear, without being blocked by location, device, or time. I also need those requirements to become clear enough that an AI Assistant can reliably drive a Coding Agent, while the overall project workflow stays simple, organized, and easy to maintain.
+As an independent developer, I need to manage multiple projects at the same time. I want to capture and raise requirements whenever they appear, without being blocked by location, device, or time. I also need those requirements to become clear enough that an AI Assistant can reliably drive a Coding Agent to begin work, while the overall project management process stays simple, clear, and orderly.
 
-VibeDeck is the result of that need: a local-first way to turn scattered ideas into structured cards, structured cards into agent-ready tasks, and multiple project streams into one orderly Kanban workflow.
+VibeDeck was created from that need: a local-first way to turn scattered ideas into structured cards, structured cards into executable agent tasks, and multiple project streams into one organized Kanban workflow.
 
 ## Design Philosophy
 
-1. Local-first. Markdown cards, local repos, and local automation stay at the center of the workflow.
-2. Keep it simple. The system is intentionally lightweight: files, terminal commands, and a small dashboard instead of a heavy PM stack.
-3. Switch flexibly. VibeDeck is designed so the coding layer can be swapped to fit your preferred agent flow, including Codex and Claude Code oriented workflows.
+1. Local-first. Markdown cards, local repositories, and local automation remain at the center of the workflow.
+2. Agent-friendly. VibeDeck provides a set of `vbd` CLI tools designed so Coding Agents can understand and execute work reliably.
+3. Keep it simple. The system stays intentionally lightweight, relying only on files, terminal commands, and a small board rather than a heavy project-management platform. Because it is aimed primarily at solo developers, it also avoids complex role and permission systems.
+4. Flexible execution. The coding layer can switch between different agent workflows based on your preference, including Codex and Claude Code, and supports both interactive and non-interactive worker launch patterns.
 
 ## How VibeDeck Works
 
-1. Capture ideas anywhere.
-  - Use OpenClaw skills or `vbd` commands to turn natural language ideas into requirement cards whenever work appears.
-2. Clarify work into agent-ready tasks.
-  - Keep cards in Markdown so specs, acceptance criteria, notes, and status stay readable, editable, and easy to refine.
-3. Organize work in one Kanban view.
-  - Review progress across projects in the local board, move work with drag-and-drop, and keep everything visible without adding process overhead.
-4. Dispatch implementation to coding agents.
-  - Use `vbd roll tick` or related commands to assign ready cards to Coding Agents such as Codex, Claude Code, or OpenClaw-assisted runners.
-5. Reconcile execution back into the system.
-  - Let VibeDeck sync logs, status, and board summaries back into the same local workflow so project management remains simple and orderly.
+1. Capture development requirements at any time.
+   - Use OpenClaw skills or the `vbd` CLI to quickly turn natural-language ideas into requirement cards.
+2. Turn requirements into agent-executable tasks.
+   - Store specs, acceptance criteria, notes, and status in Markdown so each card stays readable, editable, and easy to refine over time.
+3. Visualize and manage cards through the board.
+   - Review progress across projects in the local board, move cards with drag-and-drop, and keep work visible without introducing too much process overhead.
+4. Dispatch implementation to Coding Agents.
+   - Use commands such as `vbd roll tick` to send ready cards to Codex, Claude Code, or OpenClaw-assisted runners.
+5. Reconcile execution results back into the same system.
+   - Let VibeDeck sync logs, status, and board summaries back into the local workflow so project management stays simple, clear, and orderly.
+
+```mermaid
+flowchart TD
+    User([Developer / AI Assistant])
+
+    subgraph Hub [VibeDeck Hub]
+        Card[Markdown requirement cards]
+        Board(Board dashboard / STATUS.md)
+    end
+
+    subgraph TargetRepo [Target project repository]
+        Worktree[Dedicated Worktree<br>/.worktrees/]
+        Agent[[Coding Agent<br>Codex / Claude Code]]
+        Result[Execution results and logs<br>/.prd-autopilot/]
+        Git[(Git source code)]
+    end
+
+    %% Capture and board management
+    User -- "1. Natural-language or CLI card creation\n(vbd add)" --> Card
+    Card -- "vbd sync" --> Board
+    Board -. "Visual progress" .-> User
+
+    %% Dispatch
+    Card -- "2. vbd roll dispatch\n(assign work automatically)" --> Worktree
+    Worktree -. "reuse / mount" .-> Git
+    Worktree -- "inject context" --> Agent
+
+    %% Agent execution
+    Agent -- "3. Modify code / commit / create PR" --> Git
+    Agent -- "Produce standardized JSON" --> Result
+
+    %% Reconcile
+    Result -- "4. vbd roll reconcile\n(write back status / notes / diagnostics)" --> Card
+```
 
 ## Requirements
 
 - Node.js `>=20`
 - npm `>=10`
 - Git
-- Optional: `tmux` (recommended for `roll` with `--runner tmux`)
+- Optional: `tmux`, recommended when using `roll` with `--runner tmux`
 
 ## Getting Started
 
@@ -44,26 +79,26 @@ VibeDeck is the result of that need: a local-first way to turn scattered ideas i
 npm install
 ```
 
-2. Use the CLI locally from the repository:
+2. Use the CLI locally from the repository first:
 
 ```bash
 node ./bin/vbd.mjs help
 ```
 
-This is the default recommended setup because it always runs the CLI from the current checkout.
+Optional:
 
-Optional convenience setup:
+- If you want to use the `vbd` command directly while developing this checkout, run `npm link`.
+- Only run `npm install -g .` when you explicitly want to install it as a global command on the current machine.
 
-- Use `npm link` if you want `vbd` available as a shell command while developing this checkout.
-- Use `npm install -g .` only if you explicitly want a global installation on the current machine.
+The examples below use `vbd` as the CLI command by default. If you have not run `npm link` or a global install, replace it with `node ./bin/vbd.mjs`.
 
 3. Run an initial sync before opening the Kanban dashboard:
 
 ```bash
-node ./bin/vbd.mjs sync
+vbd sync
 ```
 
-If you used `npm link` or a global install, you can replace `node ./bin/vbd.mjs ...` with `vbd ...`.
+The `sync` command scans cards under `projects/`, builds the board summary, and writes the output to `STATUS.md` and `public/status.json`.
 
 4. Start the Kanban dashboard:
 
@@ -71,76 +106,101 @@ If you used `npm link` or a global install, you can replace `node ./bin/vbd.mjs 
 npm run dev
 ```
 
-Open `http://localhost:5566/` or `http://localhost:5566/vbd.html`.
-
-Examples below use `vbd ...` for readability.
-
-5. Install the two core skills:
-
-- `vibedeck-supervisor`: integrates VibeDeck with OpenClaw and handles scheduling plus task dispatch to workers. Install it into your OpenClaw skills directory when you want OpenClaw to drive the supervisor loop.
-- `vibedeck-worker`: integrates VibeDeck with Coding Agents such as Codex or Claude Code to execute individual tasks. Keep this skill inside the VibeDeck repository.
-
-6. Initialize config defaults:
-
-- Edit `vbd.config.json` to set up your preferred local defaults.
+Open `http://localhost:5566/` in your browser to view the VibeDeck board interface.
 
 ## Card Lifecycle
 
-Card state is defined by the `status` field in frontmatter. The supported statuses are:
+Card state is defined by the `status` field in frontmatter. The supported states are:
 
 - `Drafts`: raw ideas, excluded from daily rotation, and moved to `Pending` only after manual review.
 - `Pending`: ready for auto-dispatch and included in daily rotation.
-- `In Progress`: currently being worked on by a coding agent.
-- `Blocked`: removed from the execution loop because of missing specification, missing acceptance criteria, external dependency, missing infrastructure, or another blocker.
+- `In Progress`: currently being handled by a Coding Agent.
+- `Blocked`: removed from the execution loop because of missing specification, missing acceptance criteria, external dependencies, infrastructure issues, or another blocker.
 - `In Review`: waiting for human review before moving to `Done` or back to `Pending`.
 - `Done`: completed work that can later be archived.
 - `Archived`: archived cards, excluded from daily rotation.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Drafts : Create card (vbd add)
+    Drafts --> Pending : Fill in context, AC, and notes
+
+    note right of Pending : Ready to enter the automation pipeline
+    Pending --> In_Progress : Dispatch work (vbd roll dispatch)
+
+    state In_Progress {
+        [*] --> Setup : Create dedicated Worktree
+        Setup --> AgentRun : Start Coding Agent
+        AgentRun --> ResultJSON : Produce JSON result
+        ResultJSON --> [*]
+    }
+
+    note right of In_Progress : Coding Agent automation stage
+
+    In_Progress --> In_Review : Successful execution (Commit/PR) <br/> vbd roll reconcile
+    In_Progress --> Blocked : Blocked or failed execution <br/> vbd roll reconcile
+
+    Blocked --> Pending : Human intervention resolves blockers
+
+    In_Review --> Done : Human review approves
+    In_Review --> Pending : Rejected or sent back for rework
+
+    Done --> Archived : Project shipped / cleaned up (vbd archive)
+    Archived --> [*]
+```
+
+## Install Core Skills
+
+- `vibedeck-supervisor`: integrates with personal AI assistants such as OpenClaw and handles project and requirement-card management. When integrating with OpenClaw, install it into the [OpenClaw skills directory](https://docs.openclaw.ai/tools/skills#skills).
+- `vibedeck-worker`: integrates with Coding Agents such as Codex and Claude Code and executes the concrete development task for a single card. Install this skill in the Coding Agent skill directory. See the [Codex skills directory](https://developers.openai.com/codex/skills/) and the [Claude Code skills directory](https://code.claude.com/docs/en/skills).
 
 ## Typical Workflow
 
 ### 1. Create a project
 
-- Use the terminal command `vbd project add` for interactive project creation.
-- Or create a project through natural-language interaction with OpenClaw. Example prompt:
+- Use the terminal command `vbd project add` to create a project interactively.
+- After integrating OpenClaw, you can also create a project through an OpenClaw-supported channel. Example prompt:
 
 ```text
-Please use the VibeDeck skill to create a project named <project>, map it to the local working directory <workdir>, and run git init there.
+Please help me create a project in VibeDeck named <project>, map it to the local working directory <workdir>, and then run git init in that directory.
 ```
 
-### 2. Create a card
+### 2. Create a requirement card
 
-- Use the terminal command `vbd add` to create a new requirement card.
-- Or create a card through natural-language interaction with OpenClaw. Example prompt:
+- Use the terminal command `vbd add` to create a new requirement card interactively.
+- You can also create a card through OpenClaw natural-language interaction. Example prompt:
 
 ```text
-Please use the VibeDeck skill to create a new card in project <project> with title <title>, content <content>, and initial status Draft.
+Please help me create a new card in VibeDeck under the <project> project. The title is <title>, the content is <content>, and the initial status is Draft.
 ```
 
-### 3. Dispatch work to coding agents
+### 3. Dispatch tasks to Coding Agents
 
-Use `vbd roll dispatch` to dispatch all eligible `Pending` cards. By default, VibeDeck launches workers with the `process` runner and uses `codex` as the coding agent command, but you can switch to Claude Code with `--agent claude`. If you need attachable sessions or interactive TTY workflows, switch to `--runner tmux`. Claude still defaults to `--agent-invoke exec` when `runner=process`.
+Use `vbd roll dispatch` to dispatch all eligible `Pending` cards. By default, VibeDeck uses `process` as the runner and `codex` as the Coding Agent command. If you prefer Claude Code, switch with `--agent claude`.
 
 ```bash
 vbd roll dispatch
 ```
 
-If a project run should only count as successful after a pull request is opened, add `--create-pr`:
+`vbd roll dispatch` also supports a variety of flags to control dispatch behavior, such as limiting concurrency, targeting a specific project, or choosing the interaction model. See [Dispatch Command Details](#dispatch-command-details).
+
+If you want a run to count as successful only after it also creates a PR, add `--create-pr`:
 
 ```bash
 vbd roll dispatch --create-pr
 ```
 
-### 4. Reconcile results back into the board
+### 4. Write execution results back into the board
 
-Use `vbd roll reconcile` to read finished worker results and update card status, notes, and logs in the board.
+After board tasks finish running, VibeDeck creates a `.prd-autopilot` directory inside the project repository and writes result files there. Use `vbd roll reconcile` to read completed worker results and write back card status, notes, and logs.
 
 ```bash
 vbd roll reconcile
 ```
 
-### 5. Schedule the loop
+### 5. Scheduling loop
 
-You can run dispatch and reconcile on a schedule with `cron` or `launchd`. Example:
+You can schedule dispatch and reconcile with `cron` or `launchd`. Example:
 
 ```bash
 # Dispatch every 30 minutes
@@ -152,233 +212,38 @@ You can run dispatch and reconcile on a schedule with `cron` or `launchd`. Examp
 
 ## Core Commands
 
-VibeDeck’s `vbd` CLI is easiest to understand if you think of it as three layers:
-
-- Project registry commands: tell the hub which local repos exist and where they live.
-- Card lifecycle commands: create cards, move them through states, and refresh board summaries.
-- Supervisor commands: create worktrees, launch coding agents, reconcile results, and advance delivery.
-
-Conventions used below:
-
-- If `vbd` is not on your `PATH`, replace examples with `node ./bin/vbd.mjs ...`.
-- Examples assume you are already inside the hub root; add `--hub <path>` when you want to target another hub.
-- Aliases behave the same as their primary command unless noted otherwise.
-
-### Quick command map
-
-| Command | What it does | Use it when |
-| --- | --- | --- |
-| `vbd help` | Show top-level CLI syntax and aliases | You want a quick reminder of available entrypoints |
-| `vbd project add` / `vbd project new` | Create a project in the hub, optionally with a repo path | You are onboarding a new repo into the hub |
-| `vbd project map add` | Add or update a project → repo mapping | The project already exists but its repo path is missing or changed |
-| `vbd project map list` | Print current mappings | You want to verify what the hub thinks each project points to |
-| `vbd project map migrate` | Import legacy mappings into `PROJECTS.json` | You are upgrading an older hub layout |
-| `vbd project list` | List known projects | You want to inspect the hub registry |
-| `vbd add` / `vbd new` / `vbd create` | Create a new requirement card | You want to capture a new task |
-| `vbd move` | Change a card’s lifecycle state | You want to manually move work between states |
-| `vbd archive` | Move a card out of the active board | The card is complete or retired |
-| `vbd list pending` | Show cards currently queued for implementation | You want to inspect the next batch before dispatch |
-| `vbd sync` | Rebuild `STATUS.md` and `public/status.json` | Board summaries or dashboard data need refreshing |
-| `vbd roll dispatch` | Launch workers for eligible `pending` cards | You want to start or continue implementation work |
-| `vbd roll reconcile` | Read finished worker artifacts and update cards | You want to pull execution results back into the board |
-| `vbd roll tick` | Run one full supervisor cycle: reconcile, then dispatch | You want one safe “do the next step” command |
-| `vbd autopilot ...` | Legacy alias of `vbd roll ...` | Only when keeping older scripts working |
-
-### Typical workflows
-
-#### Onboard a new repo and create the first card
-
-```bash
-vbd project add --project pitch_deck --repo-path /var/www/consolex-ai-pitch-de --non-interactive
-vbd add --project pitch_deck --title "Polish title slide" --template lite --non-interactive
-vbd list pending --project pitch_deck --sync
-```
-
-Use this flow when the hub does not yet know about a repo and you want to start tracking work immediately.
-
-#### Run one full supervisor cycle
-
-```bash
-vbd roll tick --project pitch_deck --max-parallel 2
-```
-
-Use this when you want VibeDeck to first collect finished worker results, then launch the next eligible cards.
-
-#### Manually maintain the board
-
-```bash
-vbd move --relPath projects/pitch_deck/IMP-0005.md --to in-review
-vbd archive --relPath projects/pitch_deck/IMP-0005.md
-vbd sync
-```
-
-Use this when you are reviewing or curating cards by hand rather than relying only on the supervisor loop.
-
-### Orientation and setup commands
-
-#### `vbd help`
-
-Show top-level syntax, command families, and aliases.
-
-```bash
-vbd help
-```
-
-Use this when you need to remember the exact CLI entrypoint or available subcommands.
-
-### Project registry commands
-
-#### `vbd project add` / `vbd project new`
-
-Create a new project entry in the hub and, if you provide `--repo-path`, register its local repository path at the same time.
-
-```bash
-vbd project add --project pitch_deck --repo-path /var/www/consolex-ai-pitch-de --non-interactive
-```
-
-Choose this when the project itself is new to the hub.
-
-Use `vbd project map add` instead when the project already exists and you only want to change its repo mapping.
-
-#### `vbd project map add`
-
-Register or update the local repository path for an existing project.
-
-```bash
-vbd project map add --project pitch_deck --repo-path /var/www/consolex-ai-pitch-de --non-interactive
-```
-
-This writes to `PROJECTS.json`, which is the preferred machine-readable source for project → repo mappings.
-
-Typical reasons to run it:
-
-- a project was created without a repo path
-- the repo moved to a new location
-- you are fixing a broken mapping after cloning onto a new machine
-
-#### `vbd project map list`
-
-Print the current project registry.
-
-```bash
-vbd project map list
-```
-
-Helpful variation:
-
-```bash
-vbd project map list --json
-```
-
-Use `--json` when another script or tool needs to consume the output.
-
-#### `vbd project map migrate`
-
-Import legacy mapping data into `PROJECTS.json`.
-
-```bash
-vbd project map migrate
-```
-
-This is usually a one-time migration step for older hubs that still relied on legacy mapping sources.
-
-#### `vbd project list`
-
-List all projects known to the hub.
-
-```bash
-vbd project list
-```
-
-Use it when you want to see which projects the hub manages before creating cards or launching workers.
-
-### Card lifecycle commands
-
-#### `vbd add` / `vbd new` / `vbd create`
-
-Create a new requirement card for a project.
-
-```bash
-vbd add --project pitch_deck --template lite --title "Polish title slide" --non-interactive
-```
-
-Common flags:
-
-- `--template full|lite`: choose the card template depth
-- `--type bug|feature|improvement`: classify the card
-- `--status drafts|pending|...`: choose the initial state
-- `--non-interactive`: fail instead of prompting when required inputs are missing
-
-Use this command whenever a new task should become part of the board.
-
-#### `vbd move`
-
-Change a card’s lifecycle state by updating frontmatter and related metadata such as `updated_at`.
-
-```bash
-vbd move --relPath projects/pitch_deck/IMP-0005.md --to in-progress
-```
-
-Typical manual review flow:
-
-```bash
-vbd move --relPath projects/pitch_deck/IMP-0005.md --to in-progress
-vbd move --relPath projects/pitch_deck/IMP-0005.md --to in-review
-vbd move --relPath projects/pitch_deck/IMP-0005.md --to done
-```
-
-Use this when you want explicit manual control over a card instead of letting the supervisor decide the next status.
-
-#### `vbd archive`
-
-Move a card out of the active workspace into the archived area.
-
-```bash
-vbd archive --relPath projects/pitch_deck/IMP-0005.md
-```
-
-Archive is the “this is finished history” step. It is different from `vbd move --to done`: `done` keeps the card active on the board, while `archive` removes it from the active working set.
-
-#### `vbd list pending`
-
-List cards currently in `pending` status.
-
-```bash
-vbd list pending --sync
-```
-
-Helpful variations:
-
-```bash
-vbd list pending --project pitch_deck
-vbd list pending --json
-vbd list pending --project pitch_deck --sync
-```
-
-Use this to inspect the queue before dispatching work. It does not launch any workers.
-
-#### `vbd sync`
-
-Rebuild hub summaries and dashboard data from the current cards.
-
-```bash
-vbd sync
-```
-
-This refreshes:
-
-- `STATUS.md`
-- `public/status.json`
-
-Run it when you changed cards manually and want the board summary and dashboard to catch up immediately.
-
-### Supervisor commands
-
-Supervisor commands work with mapped repos, isolated worktrees, prompt files, result files, and worker logs. They are the commands that actually drive Coding Agents.
+The simplest way to understand VibeDeck’s `vbd` CLI is to think of it as three layers of capability:
+
+- Project registry commands: tell the hub which local repositories exist and where they live.
+- Card lifecycle commands: create cards, change states, archive cards, and refresh board summaries.
+- Dispatch commands: create worktrees, start Coding Agents, reconcile results, and move delivery forward.
+
+### Quick Command Reference
+
+| Command | Purpose / Typical use |
+| --- | --- |
+| `vbd help` | Show top-level CLI syntax and aliases. Useful when you need a quick reminder of available entrypoints. |
+| `vbd hub` | Print the absolute paths of the hub root and the projects directory. Useful for verifying which hub the current shell is targeting. |
+| `vbd project add` / `vbd project new` | Create a project in the hub and optionally register its repo path. Useful when onboarding a new repository into the hub. |
+| `vbd project map add` | Add or update a project → repo mapping. Useful when the project already exists but the repo path is missing or changed. |
+| `vbd project map list` | Print the current mapping table. Useful for checking which local repository each project points to. |
+| `vbd project list` | List known projects in the hub. Useful for seeing which projects are currently managed. |
+| `vbd add` / `vbd new` / `vbd create` | Create a new requirement card. Useful for adding a new task to the board. |
+| `vbd move` | Change a card lifecycle state. Useful for manually moving work forward. |
+| `vbd archive` | Remove a card from the active board. Useful when a card is finished or abandoned. |
+| `vbd list pending` | Show cards currently waiting to be dispatched. Useful for checking the next batch before dispatch. |
+| `vbd sync` | Rebuild `STATUS.md` and `public/status.json`. Useful when board summaries or dashboard data need refreshing. |
+| `vbd roll dispatch` | Start workers for eligible `pending` cards. Useful when you want to begin or continue implementation work. |
+| `vbd roll reconcile` | Read worker results and write them back into cards. Useful when you want to pull execution results into the board. |
+| `vbd roll tick` | Run one complete supervisor cycle: reconcile first, then dispatch. Useful when you want a single command to advance the full pipeline. |
+
+### Dispatch Command Details
+
+Dispatch commands revolve around mapped repositories, isolated worktrees, prompt files, result files, and worker logs. This is the command group that actually drives the Coding Agent.
 
 #### `vbd roll dispatch`
 
-Launch new workers for eligible `pending` cards.
+Start new workers for eligible `pending` cards.
 
 ```bash
 vbd roll dispatch
@@ -386,85 +251,95 @@ vbd roll dispatch
 
 What `dispatch` does:
 
-- checks readiness and project mapping prerequisites
-- creates or reuses per-card worktrees
-- writes prompt, log, and result artifact paths
-- starts workers up to `--max-parallel`
+- check project mappings, DoR gates, and other prerequisites
+- create or reuse a dedicated worktree for each card
+- generate prompt, log, and result file paths
+- launch workers up to the `--max-parallel` limit
 
 What `dispatch` does not do:
 
-- it does not reconcile finished results first
-- it does not move finished `in-progress` cards on its own
+- it does not reconcile completed worker results first
+- it does not automatically advance already-finished `in-progress` cards
 
-Most useful flags:
+Most commonly used flags:
 
 - `--project <name>`: dispatch only one project
-- `--max-parallel <n>`: cap active worker count
+- `--max-parallel <n>`: limit the number of active workers
 - `--runner tmux|process|command`: choose how workers are launched
-- `--agent codex|claude`: choose the agent CLI family
+- `--agent codex|claude`: choose the Coding Agent CLI family
 - `--agent-invoke exec|prompt`: choose non-interactive vs interactive agent behavior
-- `--agent-mode <mode>`: choose the automation or permission strategy
-- `--model <id>`: pin an agent model
-- `--dor strict|loose|off`: gate dispatch on Definition of Ready
-- `--create-pr`: require a successful run to create a PR after commit
-- `--dry-run`: preview without changing files or launching workers
-- `--sync false`: skip summary refresh after dispatch-related changes
+- `--agent-mode <mode>`: choose the automation or permission mode
+- `--model <id>`: pin the agent model
+- `--dor strict|loose|off`: choose the Definition of Ready gate level before dispatch
+- `--create-pr`: require a successful run to also create a PR
+- `--dry-run`: preview only, without changing files or launching workers
+- `--sync false`: skip the summary refresh after dispatch-related changes
 
 Common examples:
 
-Dispatch one project only:
+Dispatch only one project:
 
 ```bash
-vbd roll dispatch --project pitch_deck
+vbd roll dispatch --project <your_project>
 ```
 
-Raise concurrency when multiple cards are ready:
+Raise the concurrency limit:
 
 ```bash
 vbd roll dispatch --max-parallel 4
 ```
 
-Preview what would launch without touching cards or worktrees:
+Preview what would start without actually executing it:
 
 ```bash
 vbd roll dispatch --dry-run
 ```
 
-Require each successful worker to open a PR:
+Require every successful worker to also create a PR:
 
 ```bash
 vbd roll dispatch --create-pr
 ```
 
-Run Codex in non-interactive mode without `tmux`:
+Run Codex in non-interactive mode without relying on `tmux`:
 
 ```bash
 vbd roll dispatch --runner process --agent codex --agent-invoke exec
 ```
 
-Run Claude Code in interactive mode inside `tmux`:
+Run Codex in interactive `tmux` mode:
+
+```bash
+vbd roll dispatch --runner tmux --agent codex --agent-invoke prompt
+```
+
+Run Codex in non-interactive mode while still hosting it inside `tmux`:
+
+```bash
+vbd roll dispatch --runner tmux --agent codex --agent-invoke exec
+```
+
+Run Claude Code in interactive `tmux` mode:
 
 ```bash
 vbd roll dispatch --runner tmux --agent claude --agent-invoke prompt
 ```
 
-Run Claude Code in non-interactive mode while inheriting the current shell environment more directly:
+Run Claude Code in non-interactive mode while inheriting the current shell environment as directly as possible:
 
 ```bash
 vbd roll dispatch --runner process --agent claude --agent-invoke exec
 ```
 
-Run Claude Code in non-interactive mode inside `tmux`:
+Run Claude Code in non-interactive mode while still hosting it inside `tmux`:
 
 ```bash
 vbd roll dispatch --runner tmux --agent claude --agent-invoke exec
 ```
 
-Use `dispatch` when you only want to start more work. Use `tick` when you want a full reconcile-then-dispatch cycle.
-
 #### `vbd roll reconcile`
 
-Read finished worker artifacts and write the outcome back into cards.
+Read completed worker artifacts and write results back into cards.
 
 ```bash
 vbd roll reconcile
@@ -472,121 +347,104 @@ vbd roll reconcile
 
 What `reconcile` does:
 
-- keeps still-running workers in `in-progress`
-- reads worker result JSON and logs
-- moves successful cards toward `in-review`
-- moves invalid or blocked runs toward `blocked`
-- appends summaries, validation details, commit data, and PR data to the card
-- may rename finished `tmux` sessions with a status suffix when applicable
+- keep still-running workers in `in-progress`
+- read worker result JSON and logs
+- move successful executions to `in-review`
+- move invalid or blocked executions to `blocked`
+- append summaries, validation details, commit information, and PR information to the card
+- add status suffixes to finished `tmux` sessions when applicable
 
 Common examples:
 
 ```bash
-vbd roll reconcile --project pitch_deck
+# Reconcile results for only one project
+vbd roll reconcile --project <your_project>
+
+# Preview the result first, then perform the real reconcile
 vbd roll reconcile --dry-run
+
+# Wait longer before treating an infrastructure issue as blocked
 vbd roll reconcile --infra-grace-hours 12
 ```
-
-Use `--infra-grace-hours` when some project-level infrastructure files may appear later and you want to avoid treating that temporary absence as a hard infra failure too early.
 
 #### `vbd roll tick`
 
 Run one full supervisor cycle in a safe order:
 
-1. reconcile finished workers
-2. dispatch new eligible cards until the concurrency limit is reached
+1. reconcile completed worker results
+2. continue dispatching newly eligible cards within the concurrency limit
 
 ```bash
 vbd roll tick
 ```
 
-Typical scheduler-friendly usage:
+Typical scheduler usage:
 
 ```bash
-vbd roll tick --project pitch_deck --max-parallel 2
+vbd roll tick --project <your_project> --max-parallel 2
 ```
 
-Use `tick` for `cron`, `launchd`, or any “keep the pipeline moving” external scheduler. It is the best default when you do not want to manually separate reconcile and dispatch.
+### Runner and Invoke Relationship
 
-#### `vbd autopilot ...`
-
-Legacy alias of `vbd roll ...`.
-
-```bash
-vbd autopilot dispatch
-vbd autopilot reconcile
-vbd autopilot tick
-```
-
-Prefer `vbd roll ...` in new scripts. Keep `vbd autopilot ...` only for compatibility with older automation.
-
-### Runner and invoke model
-
-Two flags are easy to confuse, but they answer different questions:
+These two flags are easy to confuse, but they answer two very different questions:
 
 - `--runner`: how VibeDeck launches the worker process
-- `--agent-invoke`: how the coding agent behaves once launched
+- `--agent-invoke`: which interaction model the Coding Agent uses after launch
 
-#### Runner choices
+#### Runner Choices
 
-| Runner | Meaning | TTY | Best for |
+| Runner | Meaning | Has TTY | Best for |
 | --- | --- | --- | --- |
-| `tmux` | Start one detached `tmux` session per card | Yes | Observability, attach/debug, long tasks, interactive agents |
-| `process` | Spawn a detached background process directly | No | Simpler exec automation and closer current-shell environment inheritance |
-| `command` | Run a custom shell template via `--runner-command` | Depends on template | Advanced wrappers, remote launchers, or custom orchestrators |
+| `tmux` | Start one detached `tmux` session per card | Yes | attach/debug workflows, long-running tasks, interactive agents |
+| `process` | Start a detached background process directly | No | simpler exec automation and environment inheritance closer to the current shell |
+| `command` | Execute a custom shell template through `--runner-command` | Depends on the template | advanced wrappers, remote launchers, custom orchestrators |
 
-#### Invoke choices
+#### Invoke Choices
 
-| Invoke | Meaning | Good fit |
+| Invoke | Meaning | Best for |
 | --- | --- | --- |
-| `exec` | Non-interactive run; the agent returns a final result without a TUI session | Background automation, process runner, scheduled workflows |
-| `prompt` | Interactive/TUI run; the agent expects a TTY | `tmux`-hosted interactive sessions, debugging, or manual intervention |
-
-Legacy aliases still work:
-
-- `headless` is treated as `exec`
-- `print` is treated as `exec`
+| `exec` | Non-interactive execution; the agent returns a final result in one run | background automation, `process` runner, scheduled tasks |
+| `prompt` | Interactive / TUI execution; the agent expects a TTY | `tmux`-hosted interactive sessions, debugging, human intervention |
 
 Recommended combinations:
 
-- `tmux + prompt`: interactive worker in a detached terminal session
-- `tmux + exec`: valid; non-interactive worker hosted in `tmux` for easier attach/log inspection
-- `process + exec`: simplest non-interactive automation path
+- `tmux + prompt`: interactive worker hosted in a detached terminal session
+- `tmux + exec`: valid combination; a non-interactive worker hosted in `tmux` for attachability or easier log inspection
+- `process + exec`: the simplest non-interactive automation path
 - `process + prompt`: invalid, because prompt mode requires a TTY
 
-### Default behavior for `vbd roll ...`
+### Default Behavior for `vbd roll ...`
 
-When you run `vbd roll dispatch`, `vbd roll reconcile`, or `vbd roll tick` through the `vbd` wrapper without explicit flags, VibeDeck fills in defaults from the current environment and `vbd.config.json`.
+When you run `vbd roll dispatch`, `vbd roll reconcile`, or `vbd roll tick` through the `vbd` wrapper without explicitly providing flags, VibeDeck fills in defaults from the current environment and `vbd.config.json`.
 
 Current defaults:
 
 - Hub root: auto-detected from `--hub`, the current working tree, or `vbd.config.json > hubRoot`
-- Project filter: empty, so all projects are scanned
+- Project filter: none, so all projects are scanned
 - Max parallel workers: `2`
 - DoR gate: `loose`
 - Runner: `process`
 - tmux session prefix: `vbd`
-- Worktree dir: `.worktrees`
-- Coding agent: `codex`
-- Coding agent command: `codex`
+- Worktree directory: `.worktrees`
+- Coding Agent: `codex`
+- Coding Agent command: `codex`
 - Agent invocation: Codex defaults to `exec`; Claude Code defaults to `prompt`; Claude defaults to `exec` when `runner=process`
 - Agent mode: `danger`
-- Agent model: not pinned unless `--model` is set
+- Agent model: not pinned unless you explicitly pass `--model`
 - Create PR: `false`
 - Sync after changes: `true`
 
-Out of the box, the default local workflow is `process + codex + exec`.
+Out of the box, the default local workflow is best understood as `process + codex + exec`.
 
 ### `vbd.config.json`
 
-`vbd.config.json` is optional. The `vbd` wrapper reads it to provide defaults for `vbd roll ...` and a few hub-level convenience settings.
+`vbd.config.json` is optional. The `vbd` wrapper reads it to provide defaults for `vbd roll ...` and a small set of hub-level defaults.
 
 Minimal example using the unified agent keys:
 
 ```json
 {
   "hubRoot": ".",
-  "projectsDir": "projects",
   "autopilot": {
     "maxParallel": 2,
     "runner": "process",
@@ -601,37 +459,20 @@ Minimal example using the unified agent keys:
 }
 ```
 
-How precedence works:
+Worker credential and runtime guidance:
 
-- `hubRoot` is used when `--hub` is not provided.
-- `autopilot.*` values are used by `vbd roll ...` when the matching CLI flags are omitted.
-- `editor` is used by the dashboard "Open in editor" action.
-- Explicit CLI flags always win over `vbd.config.json`.
-- Directly invoking `node scripts/prd-autopilot/prd_autopilot.mjs ...` bypasses `vbd.config.json`, because config inheritance lives in `bin/vbd.mjs`.
-
-Useful `autopilot` keys by topic:
-
-- Execution: `maxParallel`, `runner`, `runnerCommand`, `tmuxPrefix`, `worktreeDir`, `dor`, `infraGraceHours`, `sync`
-- Agent selection: `agent`, `agentCommand`, `agentInvoke`, `agentMode`, `model`
-- Delivery requirements: `createPr`, `base`
-- Legacy compatibility: `codex`, `codexInvoke`, `codexMode`
-
-For new configs, prefer the generic `agent*` keys over the older `codex*` compatibility aliases.
-
-Worker credential guidance:
-
-- keep API tokens and similar secrets in environment variables or untracked local files
-- if a Coding Agent or PR step depends on GitHub authentication, verify that the chosen runner can see those credentials
+- keep API tokens and similar sensitive values in environment variables or untracked local files
+- if a Coding Agent or PR creation step depends on GitHub authentication, verify that your chosen runner can actually see those credentials
 - `runner=process` usually inherits the current shell environment more directly
-- `runner=tmux` depends on the `tmux` server environment, so proxy or auth variables may need to be synchronized into `tmux`
+- `runner=tmux` depends on the `tmux` server environment, so proxy variables or authentication variables may sometimes need to be synchronized into `tmux`
 
 ## Repository Layout
 
-- `projects/<project>/*.md`: active cards (local workspace data)
+- `projects/<project>/*.md`: active cards and local workspace data
 - `projects/<project>/archived/*.md`: archived cards
 - `_templates/`: shared card templates
-- `scripts/`: card/board/supervisor implementation
-- `bin/vbd.mjs`: CLI wrapper
+- `scripts/`: implementation for cards, board generation, and dispatch logic
+- `bin/vbd.mjs`: CLI wrapper entrypoint
 - `src/`: dashboard frontend
 - `tests/`: Node test suite
 
@@ -644,12 +485,10 @@ npm run test
 npm run vbd:sync
 ```
 
-## Open-source Defaults
+## Open-Source Defaults
 
 - `projects/`, `STATUS.md`, and `public/status.json` are ignored by default to avoid leaking local project data
-- `PROJECTS.json` is the preferred mapping registry; add entries with `vbd project map add`
-- Legacy AGENT mappings can be bulk-imported with `vbd project map migrate`
-- `AGENT.md` is now human-oriented guidance only; legacy mapping fallback is still supported
+- `PROJECTS.json` is the preferred project mapping registry and should usually be written through `vbd project map add`
 - Keep sensitive credentials in environment variables or untracked local files
 
 ## Contributing & Security
@@ -659,4 +498,4 @@ npm run vbd:sync
 
 ## License
 
-MIT (`LICENSE`).
+MIT. See `LICENSE` for details.

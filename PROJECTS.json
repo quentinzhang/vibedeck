@@ -12,17 +12,20 @@
     "realtime-google": {
       "repoPath": "/var/www/realtime-google"
     },
-    "vibedeck": {
-      "repoPath": "/var/www/RushDeck"
-    },
     "talkpal": {
       "repoPath": "/var/www/realtime-google"
+    },
+    "todolist": {
+      "repoPath": "/var/www/todolist"
     },
     "toolsets": {
       "repoPath": "/var/www/MCPList/backend"
     },
     "UnionLLM": {
       "repoPath": "/var/www/UnionLLM"
+    },
+    "vibedeck": {
+      "repoPath": "/var/www/RushDeck"
     },
     "visualize_mermaid": {
       "repoPath": "/var/www/visualize_mermaid"

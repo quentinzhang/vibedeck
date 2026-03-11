@@ -6,7 +6,9 @@ import path from 'node:path';
 
 import {
 	buildWorkerPrompt,
+	detectBaseBranch,
 	deriveFinalStatusFromResult,
+	ensureWorktree,
 	formatResultMarkdown,
 	hasLiveWorker,
 	getCommitGateIssues,
@@ -18,6 +20,7 @@ import {
 	resolveWorkerResultSchema,
 	validateWorkerResultShape,
 } from '../scripts/prd-autopilot/prd_autopilot.mjs';
+import { execFileSync } from 'node:child_process';
 
 function sampleResult(overrides = {}) {
 	return {
@@ -146,6 +149,36 @@ test('resolveDispatchAgentInvoke defaults Claude process runs to exec', () => {
 	assert.equal(resolveDispatchAgentInvoke('', { agent: 'claude', runner: 'tmux' }), 'prompt');
 	assert.equal(resolveDispatchAgentInvoke('prompt', { agent: 'claude', runner: 'process' }), 'prompt');
 	assert.equal(resolveDispatchAgentInvoke('', { agent: 'codex', runner: 'process' }), 'exec');
+});
+
+test('detectBaseBranch handles unborn HEAD repositories', async () => {
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'vbd-unborn-head-'));
+	const repoPath = path.join(tmp, 'repo');
+
+	execFileSync('git', ['init', repoPath], { encoding: 'utf8', stdio: 'ignore' });
+
+	assert.equal(detectBaseBranch(repoPath), 'main');
+});
+
+test('ensureWorktree creates an orphan worktree for repositories without commits', async () => {
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'vbd-unborn-worktree-'));
+	const repoPath = path.join(tmp, 'repo');
+
+	execFileSync('git', ['init', repoPath], { encoding: 'utf8', stdio: 'ignore' });
+
+	const { worktreePath, branchName, existed } = ensureWorktree({
+		repoPath,
+		project: 'demo',
+		cardId: 'FEAT-0001',
+		worktreeBaseDir: '',
+		baseBranch: '',
+		dryRun: false,
+	});
+
+	assert.equal(existed, false);
+	assert.equal(branchName, 'vbd/demo/FEAT-0001');
+	const status = execFileSync('git', ['-C', worktreePath, 'status', '--short', '--branch'], { encoding: 'utf8' });
+	assert.match(status, /No commits yet on vbd\/demo\/FEAT-0001/);
 });
 
 test('resolveWorkerResultSchema prefers the vibedeck-worker hub fallback', async () => {

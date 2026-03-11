@@ -1,22 +1,22 @@
-# Vibedeck
+# VibeDeck
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Vibedeck is a lightweight local-first Kanban hub for personal developer workflows. It combines Markdown requirement cards, a visual board, terminal-first operations, OpenClaw-powered card creation, and automated dispatch to coding agents so you can run a lightweight Vibe Coding loop across one or more projects.
+VibeDeck is a lightweight local-first Kanban hub for personal developer workflows. It combines Markdown requirement cards, a visual board, terminal-first operations, OpenClaw-powered card creation, and automated dispatch to coding agents so you can run a lightweight Vibe Coding loop across one or more projects.
 
-## Why I Built Vibedeck
+## Why I Built VibeDeck
 
 As an independent developer, I need to manage multiple projects at the same time. I want to be able to capture new requirements whenever they appear, without being blocked by location, device, or time. I also need those requirements to become clear enough that an AI Assistant can reliably drive a Coding Agent, while the overall project workflow stays simple, organized, and easy to maintain.
 
-Vibedeck is the result of that need: a local-first way to turn scattered ideas into structured cards, structured cards into agent-ready tasks, and multiple project streams into one orderly Kanban workflow.
+VibeDeck is the result of that need: a local-first way to turn scattered ideas into structured cards, structured cards into agent-ready tasks, and multiple project streams into one orderly Kanban workflow.
 
 ## Design Philosophy
 
 1. Local-first. Markdown cards, local repos, and local automation stay at the center of the workflow.
 2. Keep it simple. The system is intentionally lightweight: files, terminal commands, and a small dashboard instead of a heavy PM stack.
-3. Switch flexibly. Vibedeck is designed so the coding layer can be swapped to fit your preferred agent flow, including Codex and Claude Code oriented workflows.
+3. Switch flexibly. VibeDeck is designed so the coding layer can be swapped to fit your preferred agent flow, including Codex and Claude Code oriented workflows.
 
-## How Vibedeck Works
+## How VibeDeck Works
 
 1. Capture ideas anywhere.
   - Use OpenClaw skills or `vbd` commands to turn natural language ideas into requirement cards whenever work appears.
@@ -27,7 +27,7 @@ Vibedeck is the result of that need: a local-first way to turn scattered ideas i
 4. Dispatch implementation to coding agents.
   - Use `vbd roll tick` or related commands to assign ready cards to Coding Agents such as Codex, Claude Code, or OpenClaw-assisted runners.
 5. Reconcile execution back into the system.
-  - Let Vibedeck sync logs, status, and board summaries back into the same local workflow so project management remains simple and orderly.
+  - Let VibeDeck sync logs, status, and board summaries back into the same local workflow so project management remains simple and orderly.
 
 ## Requirements
 
@@ -77,8 +77,8 @@ Examples below use `vbd ...` for readability.
 
 5. Install the two core skills:
 
-- `vibedeck-supervisor`: integrates Vibedeck with OpenClaw and handles scheduling plus task dispatch to workers. Install it into your OpenClaw skills directory when you want OpenClaw to drive the supervisor loop.
-- `vibedeck-worker`: integrates Vibedeck with Coding Agents such as Codex or Claude Code to execute individual tasks. Keep this skill inside the Vibedeck repository.
+- `vibedeck-supervisor`: integrates VibeDeck with OpenClaw and handles scheduling plus task dispatch to workers. Install it into your OpenClaw skills directory when you want OpenClaw to drive the supervisor loop.
+- `vibedeck-worker`: integrates VibeDeck with Coding Agents such as Codex or Claude Code to execute individual tasks. Keep this skill inside the VibeDeck repository.
 
 6. Initialize config defaults:
 
@@ -104,7 +104,7 @@ Card state is defined by the `status` field in frontmatter. The supported status
 - Or create a project through natural-language interaction with OpenClaw. Example prompt:
 
 ```text
-Please use the Vibedeck skill to create a project named <project>, map it to the local working directory <workdir>, and run git init there.
+Please use the VibeDeck skill to create a project named <project>, map it to the local working directory <workdir>, and run git init there.
 ```
 
 ### 2. Create a card
@@ -113,12 +113,12 @@ Please use the Vibedeck skill to create a project named <project>, map it to the
 - Or create a card through natural-language interaction with OpenClaw. Example prompt:
 
 ```text
-Please use the Vibedeck skill to create a new card in project <project> with title <title>, content <content>, and initial status Draft.
+Please use the VibeDeck skill to create a new card in project <project> with title <title>, content <content>, and initial status Draft.
 ```
 
 ### 3. Dispatch work to coding agents
 
-Use `vbd roll dispatch` to dispatch all eligible `Pending` cards. By default, Vibedeck launches workers with the `process` runner and uses `codex` as the coding agent command, but you can switch to Claude Code with `--agent claude`. If you need attachable sessions or interactive TTY workflows, switch to `--runner tmux`. Claude still defaults to `--agent-invoke exec` when `runner=process`.
+Use `vbd roll dispatch` to dispatch all eligible `Pending` cards. By default, VibeDeck launches workers with the `process` runner and uses `codex` as the coding agent command, but you can switch to Claude Code with `--agent claude`. If you need attachable sessions or interactive TTY workflows, switch to `--runner tmux`. Claude still defaults to `--agent-invoke exec` when `runner=process`.
 
 ```bash
 vbd roll dispatch
@@ -152,7 +152,7 @@ You can run dispatch and reconcile on a schedule with `cron` or `launchd`. Examp
 
 ## Core Commands
 
-Vibedeck’s `vbd` CLI is easiest to understand if you think of it as three layers:
+VibeDeck’s `vbd` CLI is easiest to understand if you think of it as three layers:
 
 - Project registry commands: tell the hub which local repos exist and where they live.
 - Card lifecycle commands: create cards, move them through states, and refresh board summaries.
@@ -202,7 +202,7 @@ Use this flow when the hub does not yet know about a repo and you want to start 
 vbd roll tick --project pitch_deck --max-parallel 2
 ```
 
-Use this when you want Vibedeck to first collect finished worker results, then launch the next eligible cards.
+Use this when you want VibeDeck to first collect finished worker results, then launch the next eligible cards.
 
 #### Manually maintain the board
 
@@ -524,7 +524,7 @@ Prefer `vbd roll ...` in new scripts. Keep `vbd autopilot ...` only for compatib
 
 Two flags are easy to confuse, but they answer different questions:
 
-- `--runner`: how Vibedeck launches the worker process
+- `--runner`: how VibeDeck launches the worker process
 - `--agent-invoke`: how the coding agent behaves once launched
 
 #### Runner choices
@@ -556,7 +556,7 @@ Recommended combinations:
 
 ### Default behavior for `vbd roll ...`
 
-When you run `vbd roll dispatch`, `vbd roll reconcile`, or `vbd roll tick` through the `vbd` wrapper without explicit flags, Vibedeck fills in defaults from the current environment and `vbd.config.json`.
+When you run `vbd roll dispatch`, `vbd roll reconcile`, or `vbd roll tick` through the `vbd` wrapper without explicit flags, VibeDeck fills in defaults from the current environment and `vbd.config.json`.
 
 Current defaults:
 

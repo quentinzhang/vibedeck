@@ -555,7 +555,13 @@ function detectBaseBranch(repoPath) {
   if (main.ok) return 'main';
   const master = tryRun('git', ['-C', repoPath, 'show-ref', '--verify', '--quiet', 'refs/heads/master']);
   if (master.ok) return 'master';
+  const symbolic = tryRun('git', ['-C', repoPath, 'symbolic-ref', '--quiet', '--short', 'HEAD']);
+  if (symbolic.ok && symbolic.out) return symbolic.out;
   return run('git', ['-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD']);
+}
+
+function repoHasCommits(repoPath) {
+  return tryRun('git', ['-C', repoPath, 'rev-parse', '--verify', '--quiet', 'HEAD']).ok;
 }
 
 function worktreeExists(repoPath, worktreePath) {
@@ -593,6 +599,10 @@ function ensureWorktree({ repoPath, project, cardId, worktreeBaseDir, baseBranch
   if (branchExists(repoPath, branchName)) {
     run('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branchName]);
   } else {
+    if (!repoHasCommits(repoPath)) {
+      run('git', ['-C', repoPath, 'worktree', 'add', '--orphan', '-b', branchName, worktreePath]);
+      return { worktreePath, branchName, existed: false };
+    }
     const base = baseBranch || detectBaseBranch(repoPath);
     run('git', ['-C', repoPath, 'worktree', 'add', '-b', branchName, worktreePath, base]);
   }
@@ -1530,7 +1540,9 @@ if (isMainModule) {
 export {
   blockedResult,
   buildWorkerPrompt,
+  detectBaseBranch,
   deriveFinalStatusFromResult,
+  ensureWorktree,
   formatResultMarkdown,
   hasLiveWorker,
   getCommitGateIssues,

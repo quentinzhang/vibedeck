@@ -6,6 +6,14 @@ import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { parseAgentProjects, parseProjectRegistry } from '../lib/agentMapping.mjs';
+import {
+  agentInvokeNeedsTty,
+  codingAgentDisplayName,
+  defaultCodingAgentCommand,
+  normalizeCodingAgent,
+  normalizeCodingAgentInvoke,
+  normalizeCodingAgentMode,
+} from '../lib/codingAgent.mjs';
 import { extractFrontmatter, parseFrontmatterFields } from '../lib/frontmatter.mjs';
 import { buildHubStatus } from '../lib/sync.mjs';
 
@@ -127,7 +135,7 @@ let cachedTmuxBin = null;
 function buildTmuxNotFoundError() {
   const lines = [
     'tmux not found (required for --runner=tmux).',
-    'Fix: install tmux (e.g. `brew install tmux`) or set `PRD_TMUX_BIN=/absolute/path/to/tmux`.',
+    'Fix: install tmux (e.g. `brew install tmux`) and make sure it is discoverable on PATH.',
     `PATH=${process.env.PATH || ''}`,
   ];
   return lines.join('\n');
@@ -135,18 +143,6 @@ function buildTmuxNotFoundError() {
 
 function getTmuxBin({ required = false } = {}) {
   if (cachedTmuxBin !== null) {
-    if (required && !cachedTmuxBin) throw new Error(buildTmuxNotFoundError());
-    return cachedTmuxBin;
-  }
-
-  const override = String(process.env.PRD_TMUX_BIN || process.env.TMUX_BIN || '').trim();
-  if (override) {
-    if (override.includes('/') || override.includes(path.sep)) {
-      cachedTmuxBin = isExecutableFile(override) ? override : '';
-    } else {
-      const envDirs = String(process.env.PATH || '').split(path.delimiter);
-      cachedTmuxBin = resolveExecutableOnPath(override, [...COMMON_BIN_DIRS, ...envDirs]);
-    }
     if (required && !cachedTmuxBin) throw new Error(buildTmuxNotFoundError());
     return cachedTmuxBin;
   }
@@ -182,6 +178,27 @@ function artifactRootForRepo(repoPath) {
 
 function artifactRootForWorktree(worktreePath) {
   return path.join(worktreePath, '.prd-autopilot');
+}
+
+function hubWorkerSchemaPaths(hubRoot) {
+  return [
+    path.join(hubRoot, 'skills', 'vibedeck-worker', 'assets', 'result.schema.json'),
+    path.join(hubRoot, 'skills', 'prd-worker', 'assets', 'result.schema.json'),
+  ];
+}
+
+async function resolveWorkerResultSchema({ worktreePath, hubRoot }) {
+  const projectSchemaAbs = path.join(worktreePath, 'scripts', 'prd-autopilot', 'assets', 'result.schema.json');
+  const hubSchemaCandidates = hubWorkerSchemaPaths(hubRoot);
+  if (await fileExists(projectSchemaAbs)) {
+    return { schemaAbs: projectSchemaAbs, projectSchemaAbs, hubSchemaCandidates };
+  }
+  for (const candidate of hubSchemaCandidates) {
+    if (await fileExists(candidate)) {
+      return { schemaAbs: candidate, projectSchemaAbs, hubSchemaCandidates };
+    }
+  }
+  return { schemaAbs: '', projectSchemaAbs, hubSchemaCandidates };
 }
 
 async function ensureDir(dirPath) {
@@ -399,52 +416,91 @@ function buildWorkerPrompt({
   project,
   repoPath,
   worktreePath,
+  branchName,
+  createPullRequest,
   cardId,
   cardText,
   resultPath,
   schemaPath,
   logPath,
-  codexInvoke,
+  agent,
+  agentInvoke,
 }) {
   const today = getToday();
-  const invoke = String(codexInvoke || 'exec').trim();
-  const cardLabel = project ? `${cardId}@${project}` : `${cardId}`;
+  const agentKind = normalizeCodingAgent(agent || 'codex');
+  const invoke = normalizeCodingAgentInvoke(agentInvoke || '', { agent: agentKind });
+  const displayName = codingAgentDisplayName(agentKind);
+  const interactiveLabel = agentKind === 'claude' ? 'interactive mode' : 'prompt/TUI mode';
+  const resultWriterPath = path.join(hubRoot, 'scripts', 'prd-autopilot', 'write_result_json.mjs');
+  const resultWriterCmd = shellQuote(resultWriterPath);
   return [
     `Card ID: ${cardId}`,
     `Project: ${project}`,
     `Repo: ${repoPath}`,
     `Worktree: ${worktreePath}`,
-    `Codex invoke: ${invoke}`,
+    ...(branchName ? [`Assigned branch: ${branchName}`] : []),
+    `Create pull request on success: ${createPullRequest ? 'required' : 'optional'}`,
+    `Coding agent: ${displayName}`,
+    `Agent invoke: ${invoke}`,
     ...(schemaPath ? [`Result schema: ${schemaPath}`] : []),
     ...(resultPath ? [`Result JSON path: ${resultPath}`] : []),
     ...(logPath ? [`Worker log path: ${logPath}`] : []),
     `Date: ${today}`,
     `Started at: ${new Date().toISOString()}`,
     `----`,
-    `You are a coding agent working on ONE PRD card.`,
+    `You are a coding agent working on ONE vibedeck card.`,
     ``,
     `Required skill:`,
-    `- You MUST use the prd-worker skill for this run.`,
-    `- If you cannot access prd-worker, finish with outcome="blocked" and include a blocker: "prd-worker skill unavailable".`,
+    `- You MUST use the vibedeck-worker skill for this run.`,
+    `- If you cannot access vibedeck-worker, finish with outcome="blocked" and include a blocker: "vibedeck-worker skill unavailable".`,
     ``,
     `Hard constraints:`,
-    `- Do NOT edit the Rushdeck hub at ${hubRoot}. Treat it as read-only.`,
+    `- Do NOT edit the Vibedeck hub at ${hubRoot}. Treat it as read-only.`,
     `- Make code changes ONLY inside the repo worktree at: ${worktreePath}`,
+    ...(branchName ? [`- Use the assigned branch \`${branchName}\` for this card. Do not switch to a different branch.`] : []),
     `- Writing to the supervisor-provided artifact paths (Result JSON path / Worker log path) is allowed (and required in prompt/TUI mode).`,
-    `- Immediately before the FINAL JSON, output a short natural-language summary message (not JSON).`,
-    `- You MUST finish by emitting a FINAL JSON response matching the required output schema.`,
-    `- Your FINAL message must be ONLY the JSON object (no prose before/after).`,
-    `- Include the same human-readable summary inside the FINAL JSON "notes" field so it is captured in logs/artifacts.`,
-    `  - outcome: "in-review" if you implemented + validated the change.`,
-    `  - outcome: "blocked" if you cannot proceed (missing info, cannot run validation, unclear AC, etc.).`,
+    ...(invoke === 'prompt'
+      ? [
+          `- Immediately before the FINAL JSON, output a short natural-language summary message (not JSON).`,
+          `- You MUST finish by emitting a FINAL JSON response matching the required output schema.`,
+          `- Your FINAL message must be ONLY the JSON object (no prose before/after).`,
+          `- Include the same human-readable summary inside the FINAL JSON "notes" field so it is captured in logs/artifacts.`,
+        ]
+      : [
+          `- This run is non-interactive; do NOT emit a separate prose summary before the FINAL JSON.`,
+          `- You MUST finish by emitting a single FINAL JSON object matching the required output schema.`,
+          `- Return ONLY the JSON object (no prose, markdown fences, or commentary before/after).`,
+          `- Put the human-readable summary in the FINAL JSON "notes" field so it is captured in logs/artifacts.`,
+        ]),
+    `  - outcome: "in-review" ONLY if you implemented, validated, and committed the intended source changes on the assigned branch.`,
+    `  - outcome: "blocked" if you cannot proceed, cannot validate, or cannot produce the required commit evidence.`,
+    ``,
+    `Delivery requirements:`,
+    `- Your task is NOT complete until the intended source changes are committed on the assigned worktree branch.`,
+    `- Before finishing, run \`git status --short\` and make sure no intended source changes remain uncommitted.`,
+    `- Do NOT commit supervisor artifacts such as \`.prd-autopilot/**\` unless the card explicitly requires it.`,
+    `- If implementation is done but you cannot create the commit, finish with outcome="blocked" and explain why.`,
+    `- In FINAL JSON, report commit.created, commit.message, commit.sha, and commit.branch.`,
+    `- In FINAL JSON, always report pull_request.created, pull_request.url, pull_request.number, pull_request.branch, and pull_request.base_branch.`,
+    ...(createPullRequest
+      ? [
+          `- This run REQUIRES a pull request after the commit succeeds. Push the assigned branch and create a pull request targeting the appropriate base branch.`,
+          `- If pull request creation is required but unavailable (missing auth, missing remote, missing CLI, provider failure), finish with outcome="blocked" and explain why.`,
+        ]
+      : [
+          `- Pull request creation is optional for this run. If you create one, record it in pull_request.*.`,
+        ]),
     ...(invoke === 'prompt'
       ? [
           ``,
-          `IMPORTANT (prompt/TUI mode): Codex cannot auto-save your last message.`,
-          `- You MUST ALSO write the same FINAL JSON object to the file path in "Result JSON path".`,
+          `IMPORTANT (${interactiveLabel}): ${displayName} cannot auto-save your last message for the supervisor.`,
+          `- Before your FINAL message, you MUST ALSO persist the same FINAL JSON object to the file path in "Result JSON path".`,
+          `- If that file is missing when you exit, the supervisor will mark the run as blocked.`,
           `- Write ONLY the JSON object to that file (do not include the human-readable summary).`,
           `- The "Result JSON path" may be outside the worktree; writing to it is permitted for this run.`,
           `- You may use PRD_AUTOPILOT_RESULT_PATH / PRD_AUTOPILOT_SCHEMA_PATH env vars if available.`,
+          `- Preferred helper: \`node ${resultWriterCmd} --input /tmp/prd-worker-result.json\``,
+          `- The helper writes to \`PRD_AUTOPILOT_RESULT_PATH\`. You can also pipe JSON into \`node "$PRD_AUTOPILOT_RESULT_WRITER"\` if that env var is present.`,
         ]
       : []),
     ``,
@@ -455,9 +511,43 @@ function buildWorkerPrompt({
     ``,
     `Now begin.`,
     ``,
-    `Reminder: Immediately before the FINAL JSON, output a short natural-language summary message.`,
-    `Reminder: Your FINAL message must be a single JSON object matching the schema.`,
+    ...(invoke === 'prompt'
+      ? [
+          `Reminder: Immediately before the FINAL JSON, output a short natural-language summary message.`,
+          `Reminder: Your FINAL message must be a single JSON object matching the schema.`,
+        ]
+      : [
+          `Reminder: Do not output a separate prose summary before the FINAL JSON.`,
+          `Reminder: Return ONLY a single JSON object matching the schema.`,
+          `Reminder: Put the human-readable summary in the "notes" field.`,
+        ]),
   ].join('\n');
+}
+
+function normalizeBooleanOption(raw, defaultValue = false) {
+  if (raw === undefined || raw === null || raw === '') return defaultValue;
+  if (raw === true || raw === false) return raw;
+  const value = String(raw).trim().toLowerCase();
+  if (!value) return defaultValue;
+  if (['1', 'true', 'yes', 'y', 'on', 'required'].includes(value)) return true;
+  if (['0', 'false', 'no', 'n', 'off', 'optional'].includes(value)) return false;
+  return defaultValue;
+}
+
+function parseCreatePullRequestRequirement(text) {
+  const match = String(text || '').match(/Create pull request on success:\s*(required|optional)/i);
+  if (!match) return null;
+  return String(match[1]).trim().toLowerCase() === 'required';
+}
+
+async function resolveCreatePullRequestRequirement({ promptPaths, defaultValue }) {
+  for (const promptPath of promptPaths) {
+    const raw = await readText(promptPath).catch(() => '');
+    if (!raw) continue;
+    const parsed = parseCreatePullRequestRequirement(raw);
+    if (parsed !== null) return parsed;
+  }
+  return defaultValue;
 }
 
 function detectBaseBranch(repoPath) {
@@ -523,17 +613,21 @@ function tmuxNewSessionDetached({ sessionName, cwd, command, dryRun }) {
 
 function normalizeRunner(raw) {
   const v = String(raw || '').trim().toLowerCase();
-  if (!v || v === 'tmux') return 'tmux';
+  if (!v || v === 'process') return 'process';
+  if (v === 'tmux') return 'tmux';
   if (v === 'process' || v === 'proc' || v === 'background') return 'process';
   if (v === 'command' || v === 'cmd' || v === 'shell') return 'command';
   throw new Error(`Invalid --runner: ${raw} (expected: tmux|process|command)`);
 }
 
-function normalizeCodexInvoke(raw) {
-  const v = String(raw || '').trim().toLowerCase();
-  if (!v || v === 'exec') return 'exec';
-  if (v === 'prompt' || v === 'tui' || v === 'interactive') return 'prompt';
-  throw new Error(`Invalid --codex-invoke: ${raw} (expected: exec|prompt)`);
+function resolveDispatchAgentInvoke(rawInvoke, { agent, runner } = {}) {
+  const explicit = String(rawInvoke || '').trim();
+  if (explicit) return normalizeCodingAgentInvoke(explicit, { agent });
+
+  const agentKind = normalizeCodingAgent(agent || 'codex');
+  const runnerKind = normalizeRunner(runner);
+  if (agentKind === 'claude' && runnerKind === 'process') return 'exec';
+  return normalizeCodingAgentInvoke('', { agent: agentKind });
 }
 
 function pidInfoPath({ artifactRoot, runKey }) {
@@ -662,6 +756,16 @@ async function resolveWorktreePath({ repoPath, project, cardId, runKey, worktree
   return preferred;
 }
 
+async function hasLiveWorker({ sessionName, pidPaths }) {
+  for (const pidPath of Array.isArray(pidPaths) ? pidPaths : []) {
+    const pidInfo = await readPidInfo(pidPath);
+    if (pidInfo?.pid && isPidAlive(pidInfo.pid)) return true;
+  }
+
+  if (sessionName && tmuxHasSession(sessionName)) return true;
+  return false;
+}
+
 async function countActiveWorkers({ hubRoot, mapping, tmuxPrefix, projectFilter, worktreeDir }) {
   const inProgress = await listCardsByStatus({ hubRoot, status: 'in-progress', project: projectFilter });
   let active = 0;
@@ -685,25 +789,10 @@ async function countActiveWorkers({ hubRoot, mapping, tmuxPrefix, projectFilter,
     const hasExit = await fileExistsAny(exitPaths);
     if (hasResult || hasExit) continue;
 
-    let hasLivePid = false;
-    for (const pidPath of pidPaths) {
-      const pidInfo = await readPidInfo(pidPath);
-      if (pidInfo?.pid && isPidAlive(pidInfo.pid)) {
-        hasLivePid = true;
-        break;
-      }
-    }
-    if (hasLivePid) {
+    if (await hasLiveWorker({ sessionName, pidPaths })) {
       active += 1;
       continue;
     }
-
-    if (tmuxHasSession(sessionName)) {
-      active += 1;
-      continue;
-    }
-
-    // Conservative: treat missing tmux session as not active (likely crashed); reconcile will handle it.
   }
 
   return active;
@@ -715,10 +804,12 @@ async function dispatchOnce({
   maxParallel,
   dryRun,
   tmuxPrefix,
-  codexCmd,
-  codexInvoke,
-  codexMode,
-  codexModel,
+  agent,
+  agentCmd,
+  agentInvoke,
+  agentMode,
+  agentModel,
+  createPullRequest,
   baseBranch,
   worktreeDir,
   projectFilter,
@@ -734,7 +825,7 @@ async function dispatchOnce({
   const toDispatch = pending.slice(0, slots);
   if (!toDispatch.length) return { changed: false };
 
-  const runScript = path.join(hubRoot, 'scripts', 'run_codex_exec_with_logs.mjs');
+  const runScript = path.join(hubRoot, 'scripts', 'run_agent_exec_with_logs.mjs');
   const hasRunner = await fileExists(runScript);
 
   let changed = false;
@@ -748,35 +839,35 @@ async function dispatchOnce({
     const cardId = String(fields.id || card.id || '').trim();
 
     if (!project || !relPath || !cardId) continue;
-	    const repoPath = mapping.get(project);
-	    if (!repoPath) {
-	      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
-	      if (moved?.destAbs) {
-	        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
-	        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
-	        await appendAutopilotNote(
-	          targetAbs,
-            buildAutopilotBlockedNote({ title: 'Missing repo mapping in hub PROJECTS.json', blockers: [`project=${project}`] }),
-	          { dryRun },
-	        );
-	        changed = true;
-	      }
+    const repoPath = mapping.get(project);
+    if (!repoPath) {
+      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
+      if (moved?.destAbs) {
+        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
+        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
+        await appendAutopilotNote(
+          targetAbs,
+          buildAutopilotBlockedNote({ title: 'Missing repo mapping in hub PROJECTS.json', blockers: [`project=${project}`] }),
+          { dryRun },
+        );
+        changed = true;
+      }
       continue;
     }
 
-	    const dor = checkDefinitionOfReady({ cardText, frontmatter: fields, dorMode });
-	    if (!dor.ok) {
-	      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
-	      if (moved?.destAbs) {
-	        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
-	        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
-	        await appendAutopilotNote(
-	          targetAbs,
-	          buildAutopilotBlockedNote({ title: 'Definition of Ready not met', blockers: dor.missing }),
-	          { dryRun },
-	        );
-	        changed = true;
-	      }
+    const dor = checkDefinitionOfReady({ cardText, frontmatter: fields, dorMode });
+    if (!dor.ok) {
+      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
+      if (moved?.destAbs) {
+        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
+        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
+        await appendAutopilotNote(
+          targetAbs,
+          buildAutopilotBlockedNote({ title: 'Definition of Ready not met', blockers: dor.missing }),
+          { dryRun },
+        );
+        changed = true;
+      }
       continue;
     }
 
@@ -786,7 +877,7 @@ async function dispatchOnce({
       continue;
     }
 
-    if (codexInvoke === 'prompt' && normalizeRunner(runner) === 'process') {
+    if (agentInvokeNeedsTty({ agent, invoke: agentInvoke }) && normalizeRunner(runner) === 'process') {
       const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
       if (moved?.destAbs) {
         const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
@@ -794,7 +885,7 @@ async function dispatchOnce({
         await appendAutopilotNote(
           targetAbs,
           buildAutopilotBlockedNote({
-            title: 'Unsupported runner for codex-invoke=prompt',
+            title: `Unsupported runner for ${agent}-invoke=${agentInvoke}`,
             blockers: ['runner=process does not provide a TTY; use --runner=tmux (recommended) or --runner=command'],
           }),
           { dryRun },
@@ -804,7 +895,7 @@ async function dispatchOnce({
       continue;
     }
 
-    const { worktreePath } = ensureWorktree({
+    const { worktreePath, branchName } = ensureWorktree({
       repoPath,
       project,
       cardId,
@@ -813,53 +904,47 @@ async function dispatchOnce({
       dryRun,
     });
 
-      const runKey = computeRunKey(project, cardId);
-      const artifactRoot = artifactRootForRepo(repoPath);
-      const artifactRoots = [artifactRoot, artifactRootForWorktree(worktreePath)];
-      const promptsDir = path.join(artifactRoot, 'prompts');
-      const resultsDir = path.join(artifactRoot, 'results');
-      const promptAbs = path.join(promptsDir, `${runKey}.md`);
-      const resultAbs = path.join(resultsDir, `${runKey}.json`);
-      const logAbs = path.join(resultsDir, `${runKey}.log`);
-      const pidAbs = pidInfoPath({ artifactRoot, runKey });
-    const projectSchemaAbs = path.join(worktreePath, 'scripts', 'prd-autopilot', 'assets', 'result.schema.json');
-    const hubSchemaAbs = path.join(hubRoot, 'skills', 'prd-worker', 'assets', 'result.schema.json');
-    const schemaAbs = (await fileExists(projectSchemaAbs))
-      ? projectSchemaAbs
-      : (await fileExists(hubSchemaAbs))
-        ? hubSchemaAbs
-        : '';
+    const runKey = computeRunKey(project, cardId);
+    const artifactRoot = artifactRootForRepo(repoPath);
+    const artifactRoots = [artifactRoot, artifactRootForWorktree(worktreePath)];
+    const promptsDir = path.join(artifactRoot, 'prompts');
+    const resultsDir = path.join(artifactRoot, 'results');
+    const promptAbs = path.join(promptsDir, `${runKey}.md`);
+    const resultAbs = path.join(resultsDir, `${runKey}.json`);
+    const logAbs = path.join(resultsDir, `${runKey}.log`);
+    const pidAbs = pidInfoPath({ artifactRoot, runKey });
+    const { schemaAbs, projectSchemaAbs, hubSchemaCandidates } = await resolveWorkerResultSchema({ worktreePath, hubRoot });
 
-	    if (!hasRunner) {
-	      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
-	      if (moved?.destAbs) {
-	        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
-	        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
-	        await appendAutopilotNote(
-	          targetAbs,
-	          buildAutopilotBlockedNote({
-	            title: 'Infra missing: hub runner script not found',
-	            blockers: [`missing: ${runScript}`],
-	          }),
-	          { dryRun },
+    if (!hasRunner) {
+      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
+      if (moved?.destAbs) {
+        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
+        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
+        await appendAutopilotNote(
+          targetAbs,
+          buildAutopilotBlockedNote({
+            title: 'Infra missing: hub runner script not found',
+            blockers: [`missing: ${runScript}`],
+          }),
+          { dryRun },
         );
         changed = true;
       }
       continue;
     }
 
-	    if (!schemaAbs) {
-	      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
-	      if (moved?.destAbs) {
-	        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
-	        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
-	        await appendAutopilotNote(
-	          targetAbs,
-	          buildAutopilotBlockedNote({
-	            title: 'Infra missing: result schema not found (project and hub fallback)',
-	            blockers: [`missing: ${projectSchemaAbs}`, `missing: ${hubSchemaAbs}`],
-	          }),
-	          { dryRun },
+    if (!schemaAbs) {
+      const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
+      if (moved?.destAbs) {
+        const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
+        await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
+        await appendAutopilotNote(
+          targetAbs,
+          buildAutopilotBlockedNote({
+            title: 'Infra missing: result schema not found (project and hub fallback)',
+            blockers: [`missing: ${projectSchemaAbs}`, ...hubSchemaCandidates.map((candidate) => `missing: ${candidate}`)],
+          }),
+          { dryRun },
         );
         changed = true;
       }
@@ -871,39 +956,43 @@ async function dispatchOnce({
       project,
       repoPath,
       worktreePath,
+      branchName,
+      createPullRequest,
       cardId,
       cardText,
       resultPath: resultAbs,
       schemaPath: schemaAbs,
       logPath: logAbs,
-      codexInvoke,
+      agent,
+      agentInvoke,
     });
 
     if (!dryRun) {
       await ensureDir(promptsDir);
       await ensureDir(resultsDir);
 
-	      // Reset stale artifacts from previous runs to prevent reconcile from consuming old results/exitcodes.
-	      // Keep history by moving them aside with a timestamp suffix.
-	      const tag = artifactTimestampTag();
-	      for (const root of artifactRoots) {
-	        await resetArtifactsForRun({ artifactRoot: root, runKey, tag, dryRun });
-	      }
+      // Reset stale artifacts from previous runs to prevent reconcile from consuming old results/exitcodes.
+      // Keep history by moving them aside with a timestamp suffix.
+      const tag = artifactTimestampTag();
+      for (const root of artifactRoots) {
+        await resetArtifactsForRun({ artifactRoot: root, runKey, tag, dryRun });
+      }
       await fs.writeFile(promptAbs, promptText, 'utf8');
     }
 
-	    // Move card to in-progress last to reduce time spent in in-progress without an active worker.
-	    const moved = await moveCard({ hubRoot, relPath, toStatus: 'in-progress', dryRun }).catch(() => null);
-	    if (!moved?.destAbs) continue;
-	    await updateCardStatusFrontmatter(dryRun ? moved.srcAbs : moved.destAbs, { status: 'in-progress', dryRun });
+    const moved = await moveCard({ hubRoot, relPath, toStatus: 'in-progress', dryRun }).catch(() => null);
+    if (!moved?.destAbs) continue;
+    await updateCardStatusFrontmatter(dryRun ? moved.srcAbs : moved.destAbs, { status: 'in-progress', dryRun });
 
     const runnerArgs = [
+      '--agent',
+      agent,
+      '--agent-command',
+      agentCmd,
       '--invoke',
-      codexInvoke,
+      agentInvoke,
       '--mode',
-      codexMode,
-      '--codex',
-      codexCmd,
+      agentMode,
       '--workdir',
       worktreePath,
       '--prompt',
@@ -914,11 +1003,16 @@ async function dispatchOnce({
       resultAbs,
       '--log',
       logAbs,
-      ...(codexModel ? ['--model', codexModel] : []),
+      ...(agentModel ? ['--model', agentModel] : []),
       '--skip-git-repo-check',
     ];
 
     const templateVars = {
+      agent,
+      agentCmd,
+      agentInvoke,
+      agentMode,
+      agentModel,
       sessionName,
       worktreePath,
       promptAbs,
@@ -926,13 +1020,19 @@ async function dispatchOnce({
       resultAbs,
       logAbs,
       pidAbs,
-      codexCmd,
-      codexInvoke,
-      codexMode,
-      codexModel,
+      agentCmdLegacy: agentCmd,
+      codexCmd: agentCmd,
+      codexInvoke: agentInvoke,
+      codexMode: agentMode,
+      codexModel: agentModel,
       runScript,
       openclawRunScript: path.join(hubRoot, 'scripts', 'run_openclaw_exec.mjs'),
       node: process.execPath,
+      agent_q: shellQuote(agent),
+      agentCmd_q: shellQuote(agentCmd),
+      agentInvoke_q: shellQuote(agentInvoke),
+      agentMode_q: shellQuote(agentMode),
+      agentModel_q: shellQuote(agentModel),
       sessionName_q: shellQuote(sessionName),
       worktreePath_q: shellQuote(worktreePath),
       promptAbs_q: shellQuote(promptAbs),
@@ -940,10 +1040,10 @@ async function dispatchOnce({
       resultAbs_q: shellQuote(resultAbs),
       logAbs_q: shellQuote(logAbs),
       pidAbs_q: shellQuote(pidAbs),
-      codexCmd_q: shellQuote(codexCmd),
-      codexInvoke_q: shellQuote(codexInvoke),
-      codexMode_q: shellQuote(codexMode),
-      codexModel_q: shellQuote(codexModel),
+      codexCmd_q: shellQuote(agentCmd),
+      codexInvoke_q: shellQuote(agentInvoke),
+      codexMode_q: shellQuote(agentMode),
+      codexModel_q: shellQuote(agentModel),
       runScript_q: shellQuote(runScript),
       openclawRunScript_q: shellQuote(path.join(hubRoot, 'scripts', 'run_openclaw_exec.mjs')),
       node_q: shellQuote(process.execPath),
@@ -963,7 +1063,7 @@ async function dispatchOnce({
     if (!dryRun && pid) {
       await fs.writeFile(
         pidAbs,
-        `${JSON.stringify({ pid, runner: normalizeRunner(runner), startedAt: new Date().toISOString(), command: { runScript, runnerArgs } }, null, 2)}\n`,
+        `${JSON.stringify({ pid, runner: normalizeRunner(runner), startedAt: new Date().toISOString(), agent, command: { runScript, runnerArgs } }, null, 2)}\n`,
         'utf8',
       );
     }
@@ -981,14 +1081,13 @@ function validateWorkerResultShape(result) {
   const errors = [];
   if (!isPlainObject(result)) return { ok: false, errors: ['Result is not a JSON object'] };
 
-  const allowedKeys = new Set(['outcome', 'summary', 'blockers', 'validation', 'files_changed', 'commit', 'notes']);
+  const allowedKeys = new Set(['outcome', 'summary', 'blockers', 'validation', 'files_changed', 'commit', 'pull_request', 'notes']);
   for (const k of Object.keys(result)) {
     if (!allowedKeys.has(k)) errors.push(`Unexpected key: ${k}`);
   }
 
   const outcome = result.outcome;
   if (outcome !== 'in-review' && outcome !== 'blocked') errors.push('Invalid outcome (expected "in-review"|"blocked")');
-
   if (typeof result.summary !== 'string' || result.summary.trim().length === 0) errors.push('Invalid summary');
   if (!Array.isArray(result.blockers) || result.blockers.some((b) => typeof b !== 'string')) errors.push('Invalid blockers');
   if (!Array.isArray(result.files_changed) || result.files_changed.some((f) => typeof f !== 'string')) errors.push('Invalid files_changed');
@@ -1012,10 +1111,31 @@ function validateWorkerResultShape(result) {
   else {
     if (typeof commit.created !== 'boolean') errors.push('Invalid commit.created');
     if (typeof commit.message !== 'string') errors.push('Invalid commit.message');
+    if (typeof commit.sha !== 'string') errors.push('Invalid commit.sha');
+    if (typeof commit.branch !== 'string') errors.push('Invalid commit.branch');
+    if (commit.created === true) {
+      if (commit.message.trim().length === 0) errors.push('Missing commit.message for created commit');
+      if (commit.sha.trim().length === 0) errors.push('Missing commit.sha for created commit');
+      if (commit.branch.trim().length === 0) errors.push('Missing commit.branch for created commit');
+    }
+  }
+
+  const pullRequest = result.pull_request;
+  if (!isPlainObject(pullRequest)) errors.push('Invalid pull_request');
+  else {
+    if (typeof pullRequest.created !== 'boolean') errors.push('Invalid pull_request.created');
+    if (typeof pullRequest.url !== 'string') errors.push('Invalid pull_request.url');
+    if (typeof pullRequest.number !== 'string') errors.push('Invalid pull_request.number');
+    if (typeof pullRequest.branch !== 'string') errors.push('Invalid pull_request.branch');
+    if (typeof pullRequest.base_branch !== 'string') errors.push('Invalid pull_request.base_branch');
+    if (pullRequest.created === true) {
+      if (pullRequest.url.trim().length === 0) errors.push('Missing pull_request.url for created pull request');
+      if (pullRequest.branch.trim().length === 0) errors.push('Missing pull_request.branch for created pull request');
+      if (pullRequest.base_branch.trim().length === 0) errors.push('Missing pull_request.base_branch for created pull request');
+    }
   }
 
   if (typeof result.notes !== 'string') errors.push('Invalid notes');
-
   return { ok: errors.length === 0, errors };
 }
 
@@ -1026,9 +1146,40 @@ function blockedResult(summary, blockers = []) {
     blockers: Array.isArray(blockers) ? blockers.map((b) => String(b).trim()).filter(Boolean) : [],
     validation: [],
     files_changed: [],
-    commit: { created: false, message: '' },
+    commit: { created: false, message: '', sha: '', branch: '' },
+    pull_request: { created: false, url: '', number: '', branch: '', base_branch: '' },
     notes: '',
   };
+}
+
+function getCommitGateIssues(result) {
+  const commit = isPlainObject(result?.commit) ? result.commit : null;
+  if (!commit || commit.created !== true) return ['Worker did not create a commit'];
+
+  const issues = [];
+  if (typeof commit.message !== 'string' || commit.message.trim().length === 0) issues.push('Worker result is missing commit.message');
+  if (typeof commit.sha !== 'string' || commit.sha.trim().length === 0) issues.push('Worker result is missing commit.sha');
+  if (typeof commit.branch !== 'string' || commit.branch.trim().length === 0) issues.push('Worker result is missing commit.branch');
+  return issues;
+}
+
+function getPullRequestGateIssues(result, { requirePullRequest = false } = {}) {
+  if (!requirePullRequest) return [];
+  const pullRequest = isPlainObject(result?.pull_request) ? result.pull_request : null;
+  if (!pullRequest || pullRequest.created !== true) return ['Worker did not create a pull request'];
+
+  const issues = [];
+  if (typeof pullRequest.url !== 'string' || pullRequest.url.trim().length === 0) issues.push('Worker result is missing pull_request.url');
+  if (typeof pullRequest.branch !== 'string' || pullRequest.branch.trim().length === 0) issues.push('Worker result is missing pull_request.branch');
+  if (typeof pullRequest.base_branch !== 'string' || pullRequest.base_branch.trim().length === 0) issues.push('Worker result is missing pull_request.base_branch');
+  return issues;
+}
+
+function deriveFinalStatusFromResult(result, { requirePullRequest = false } = {}) {
+  const outcome = String(result?.outcome || '').trim();
+  if (outcome !== 'in-review') return 'blocked';
+  const issues = [...getCommitGateIssues(result), ...getPullRequestGateIssues(result, { requirePullRequest })];
+  return issues.length === 0 ? 'in-review' : 'blocked';
 }
 
 function normalizeWorkerResult(raw) {
@@ -1038,7 +1189,7 @@ function normalizeWorkerResult(raw) {
   return /** @type {any} */ (raw);
 }
 
-function formatResultMarkdown({ project, cardId, sessionName, repoPath, worktreePath, result }) {
+function formatResultMarkdown({ project, cardId, sessionName, repoPath, worktreePath, result, finalStatus = '', gateIssues = [] }) {
   const lines = [];
   lines.push('## Autopilot', '', `### ${getToday()}`, '');
   lines.push(`- Project: \`${project}\``);
@@ -1047,11 +1198,51 @@ function formatResultMarkdown({ project, cardId, sessionName, repoPath, worktree
   if (repoPath) lines.push(`- Repo: \`${repoPath}\``);
   if (worktreePath) lines.push(`- Worktree: \`${worktreePath}\``);
   lines.push(`- Outcome: \`${result?.outcome || 'blocked'}\``);
+  if (finalStatus && finalStatus !== result?.outcome) lines.push(`- Reconciled status: \`${finalStatus}\``);
   lines.push(`- Summary: ${String(result?.summary || '').trim() || '(no summary)'}`);
   const blockers = Array.isArray(result?.blockers) ? result.blockers.filter(Boolean) : [];
   if (blockers.length) {
     lines.push('- Blockers:');
     for (const b of blockers.slice(0, 10)) lines.push(`  - ${String(b).trim()}`);
+  }
+  if (gateIssues.length) {
+    lines.push('- Delivery gate:');
+    for (const issue of gateIssues.slice(0, 10)) lines.push(`  - ${String(issue).trim()}`);
+  }
+  const validation = Array.isArray(result?.validation) ? result.validation : [];
+  if (validation.length) {
+    lines.push('- Validation:');
+    for (const v of validation.slice(0, 10)) {
+      const cmd = String(v?.command || '').trim();
+      const ok = v?.ok === true ? 'OK' : 'FAIL';
+      const notes = String(v?.notes || '').trim();
+      lines.push(`  - ${ok}: \`${cmd || '(unknown)'}\`${notes ? ` - ${notes}` : ''}`);
+    }
+  }
+  const files = Array.isArray(result?.files_changed) ? result.files_changed : [];
+  if (files.length) {
+    lines.push('- Files changed:');
+    for (const f of files.slice(0, 20)) lines.push(`  - \`${String(f).trim()}\``);
+  }
+  const commit = isPlainObject(result?.commit) ? result.commit : null;
+  if (commit) {
+    lines.push(`- Commit created: \`${commit.created === true ? 'true' : 'false'}\``);
+    if (String(commit.message || '').trim()) lines.push(`- Commit message: \`${String(commit.message).trim()}\``);
+    if (String(commit.sha || '').trim()) lines.push(`- Commit SHA: \`${String(commit.sha).trim()}\``);
+    if (String(commit.branch || '').trim()) lines.push(`- Commit branch: \`${String(commit.branch).trim()}\``);
+  }
+  const pullRequest = isPlainObject(result?.pull_request) ? result.pull_request : null;
+  if (pullRequest) {
+    lines.push(`- Pull request created: \`${pullRequest.created === true ? 'true' : 'false'}\``);
+    if (String(pullRequest.url || '').trim()) lines.push(`- Pull request URL: \`${String(pullRequest.url).trim()}\``);
+    if (String(pullRequest.number || '').trim()) lines.push(`- Pull request number: \`${String(pullRequest.number).trim()}\``);
+    if (String(pullRequest.branch || '').trim()) lines.push(`- Pull request branch: \`${String(pullRequest.branch).trim()}\``);
+    if (String(pullRequest.base_branch || '').trim()) lines.push(`- Pull request base branch: \`${String(pullRequest.base_branch).trim()}\``);
+  }
+  const notes = String(result?.notes || '').trim();
+  if (notes) {
+    lines.push('- Notes:');
+    for (const line of notes.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 20)) lines.push(`  - ${line}`);
   }
   return lines.join('\n');
 }
@@ -1062,6 +1253,7 @@ async function reconcileOnce({
   dryRun,
   tmuxPrefix,
   projectFilter,
+  createPullRequest,
   worktreeDir,
   infraGraceHours,
 }) {
@@ -1084,32 +1276,35 @@ async function reconcileOnce({
     const resultPaths = artifactRoots.map((root) => path.join(root, 'results', `${runKey}.json`));
     const exitPaths = resultPaths.map((p) => `${p}.exitcode`);
     const promptPaths = artifactRoots.map((root) => path.join(root, 'prompts', `${runKey}.md`));
+    const pidPaths = artifactRoots.map((root) => pidInfoPath({ artifactRoot: root, runKey }));
     const projectSchemaAbs = path.join(worktreePath, 'scripts', 'prd-autopilot', 'assets', 'result.schema.json');
 
     const hasResult = await fileExistsAny(resultPaths);
     const hasExit = await fileExistsAny(exitPaths);
     if (!hasResult && !hasExit) {
+      if (await hasLiveWorker({ sessionName, pidPaths })) continue;
+
       const graceHours = Number.isFinite(infraGraceHours) ? infraGraceHours : 6;
       const graceMs = Math.max(0, graceHours) * 60 * 60 * 1000;
 
-      if (!(await fileExists(projectSchemaAbs)) && !tmuxHasSession(sessionName)) {
+      if (!(await fileExists(projectSchemaAbs))) {
         let stat = null;
         for (const p of promptPaths) {
           stat = await fs.stat(p).catch(() => null);
           if (stat) break;
         }
         const ageMs = stat ? Date.now() - stat.mtimeMs : 0;
-	        if (stat && ageMs >= graceMs) {
-	          const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
-	          if (moved?.destAbs) {
-	            const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
-	            await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
-	            await appendAutopilotNote(
-	              targetAbs,
-	              buildAutopilotBlockedNote({
-	                title: `Infra missing: project result schema not found (>${graceHours}h)`,
-	                blockers: [`missing: ${projectSchemaAbs}`],
-	              }),
+        if (stat && ageMs >= graceMs) {
+          const moved = await moveCard({ hubRoot, relPath, toStatus: 'blocked', dryRun }).catch(() => null);
+          if (moved?.destAbs) {
+            const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
+            await updateCardStatusFrontmatter(targetAbs, { status: 'blocked', dryRun });
+            await appendAutopilotNote(
+              targetAbs,
+              buildAutopilotBlockedNote({
+                title: `Infra missing: project result schema not found (>${graceHours}h)`,
+                blockers: [`missing: ${projectSchemaAbs}`],
+              }),
               { dryRun },
             );
             changed = true;
@@ -1135,19 +1330,23 @@ async function reconcileOnce({
     }
 
     const result = normalizeWorkerResult(raw);
-    const outcome = String(result.outcome || '').trim();
-    const toStatus = outcome === 'in-review' ? 'in-review' : 'blocked';
+    const requirePullRequest = await resolveCreatePullRequestRequirement({ promptPaths, defaultValue: createPullRequest });
+    const gateIssues = [
+      ...getCommitGateIssues(result),
+      ...getPullRequestGateIssues(result, { requirePullRequest }),
+    ];
+    const toStatus = deriveFinalStatusFromResult(result, { requirePullRequest });
 
-	    const moved = await moveCard({ hubRoot, relPath, toStatus, dryRun }).catch(() => null);
-	    if (!moved?.destAbs) continue;
+    const moved = await moveCard({ hubRoot, relPath, toStatus, dryRun }).catch(() => null);
+    if (!moved?.destAbs) continue;
 
-	    const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
-	    await updateCardStatusFrontmatter(targetAbs, { status: toStatus, dryRun });
-	    await appendAutopilotNote(
-	      targetAbs,
-	      formatResultMarkdown({ project, cardId, sessionName, repoPath, worktreePath, result }),
-	      { dryRun },
-	    );
+    const targetAbs = dryRun ? moved.srcAbs : moved.destAbs;
+    await updateCardStatusFrontmatter(targetAbs, { status: toStatus, dryRun });
+    await appendAutopilotNote(
+      targetAbs,
+      formatResultMarkdown({ project, cardId, sessionName, repoPath, worktreePath, result, finalStatus: toStatus, gateIssues }),
+      { dryRun },
+    );
 
     if (sessionName && tmuxHasSession(sessionName)) {
       const doneName = sanitizeKey(`${sessionName}__${toStatus}`);
@@ -1168,7 +1367,7 @@ async function maybeSync({ hubRoot, enabled, dryRun }) {
 }
 
 function printHelp() {
-  console.log(`Rushdeck Roll (supervisor)
+  console.log(`Vibedeck Roll (supervisor)
 
 Usage:
   node scripts/prd-autopilot/prd_autopilot.mjs dispatch [options]
@@ -1176,22 +1375,27 @@ Usage:
   node scripts/prd-autopilot/prd_autopilot.mjs tick [options]
 
 Notes:
-  - Preferred CLI entrypoint: prd roll <dispatch|reconcile|tick>
-  - Legacy alias: prd autopilot <dispatch|reconcile|tick>
+  - Preferred CLI entrypoint: vbd roll <dispatch|reconcile|tick>
+  - Legacy aliases: vbd autopilot <dispatch|reconcile|tick> and prd ...
 
-Options:
+  Options:
   --hub <path>                 Hub root (default: repo root)
   --project <name>             Restrict to one project
   --max-parallel <n>           Max concurrent running cards (default: 2)
   --dor strict|loose|off       Definition of Ready gate (default: loose)
-  --runner tmux|process|command Worker launcher (default: tmux)
-  --runner-command <template>  Shell template when --runner=command (supports {node_q},{runScript_q},{openclawRunScript_q},{worktreePath_q},{promptAbs_q},{schemaAbs_q},{resultAbs_q},{logAbs_q},{pidAbs_q},{sessionName_q},{codexCmd_q},{codexInvoke_q},{codexMode_q},{codexModel_q})
-  --tmux-prefix <prefix>       tmux session name prefix (default: prd)
+  --runner tmux|process|command Worker launcher (default: process)
+  --runner-command <template>  Shell template when --runner=command (supports {node_q},{runScript_q},{openclawRunScript_q},{worktreePath_q},{promptAbs_q},{schemaAbs_q},{resultAbs_q},{logAbs_q},{pidAbs_q},{sessionName_q},{agent_q},{agentCmd_q},{agentInvoke_q},{agentMode_q},{agentModel_q} plus legacy {codex*} aliases)
+  --tmux-prefix <prefix>       tmux session name prefix (default: vbd)
   --worktree-dir <path>        Worktree base dir inside repo (default: .worktrees)
-  --codex <path>               codex CLI path (default: codex)
-  --codex-invoke exec|prompt   How to run Codex (default: exec). prompt launches the interactive TUI and may not exit automatically.
-  --codex-mode danger|full-auto  codex exec automation mode (default: danger)
-  --model <id>                 codex model (optional)
+  --agent codex|claude         Coding agent kind (default: codex)
+  --agent-command <path>       agent CLI path (default: codex|claude by agent)
+  --agent-invoke <mode>        exec|prompt (legacy aliases: headless|print; default: codex=exec, claude=prompt, claude+process=exec)
+  --agent-mode <mode>          shared: danger|full-auto|none; claude-only: default|accept-edits|plan|dont-ask|bypass-permissions|delegate
+  --model <id>                 agent model (optional)
+  --codex <path>               legacy alias of --agent-command when --agent=codex
+  --codex-invoke <mode>        legacy alias of --agent-invoke for Codex (accepts exec|prompt and headless)
+  --codex-mode danger|full-auto legacy alias of --agent-mode for Codex
+  --create-pr                  Require the worker to create a pull request after a successful commit
   --base <branch>              Worktree base branch (default: detect main/master/HEAD)
   --infra-grace-hours <n>      Only block missing project schema after N hours (reconcile only; default: 6)
   --sync false                 Skip STATUS/public/status.json update (default: true)
@@ -1215,14 +1419,19 @@ async function main() {
   const projectFilter = args.project ? String(args.project).trim() : '';
   const maxParallel = Number.parseInt(String(args['max-parallel'] || '2'), 10);
   const dryRun = args['dry-run'] === true;
-  const tmuxPrefix = String(args['tmux-prefix'] || 'prd').trim();
-  const codexCmd = String(args.codex || 'codex').trim();
-  const codexInvoke = normalizeCodexInvoke(args['codex-invoke'] || 'exec');
-  const codexMode = String(args['codex-mode'] || 'danger').trim();
-  const codexModel = args.model ? String(args.model).trim() : '';
+  const tmuxPrefix = String(args['tmux-prefix'] || 'vbd').trim();
+  const agent = normalizeCodingAgent(args.agent || 'codex');
+  const agentCmd = String(args['agent-command'] || args.agent_command || args.codex || defaultCodingAgentCommand(agent)).trim();
+  const runner = normalizeRunner(args.runner);
+  const agentInvoke = resolveDispatchAgentInvoke(args['agent-invoke'] || args.agent_invoke || args['codex-invoke'] || '', {
+    agent,
+    runner,
+  });
+  const agentMode = normalizeCodingAgentMode(args['agent-mode'] || args.agent_mode || args['codex-mode'] || '', { agent });
+  const agentModel = args.model ? String(args.model).trim() : '';
+  const createPullRequest = normalizeBooleanOption(args['create-pr'] ?? args.create_pr, false);
   const baseBranch = args.base ? String(args.base).trim() : '';
   const worktreeDir = args['worktree-dir'] ? String(args['worktree-dir']).trim() : '';
-  const runner = normalizeRunner(args.runner);
   const runnerCommand = args['runner-command'] ? String(args['runner-command']) : '';
   const sync = args.sync !== false;
   const dorMode = normalizeDorMode(args.dor);
@@ -1238,50 +1447,55 @@ async function main() {
       dryRun,
       tmuxPrefix,
       projectFilter,
+      createPullRequest,
       worktreeDir,
       infraGraceHours,
     });
     if (rec.changed) await maybeSync({ hubRoot, enabled: sync, dryRun });
 
-	    const disp = await dispatchOnce({
-	      hubRoot,
-	      mapping,
-	      maxParallel,
-	      dryRun,
-	      tmuxPrefix,
-	      codexCmd,
-	      codexInvoke,
-	      codexMode,
-	      codexModel,
-	      baseBranch,
-	      worktreeDir,
-	      projectFilter,
-	      dorMode,
-	      runner,
-	      runnerCommand,
-	    });
+    const disp = await dispatchOnce({
+      hubRoot,
+      mapping,
+      maxParallel,
+      dryRun,
+      tmuxPrefix,
+      agent,
+      agentCmd,
+      agentInvoke,
+      agentMode,
+      agentModel,
+      createPullRequest,
+      baseBranch,
+      worktreeDir,
+      projectFilter,
+      dorMode,
+      runner,
+      runnerCommand,
+    });
     if (disp.changed) await maybeSync({ hubRoot, enabled: sync, dryRun });
     return;
   }
 
-	  if (command === 'dispatch') {
-	    const res = await dispatchOnce({
-	      hubRoot,
-	      mapping,
-	      maxParallel,
-	      dryRun,
-	      tmuxPrefix,
-	      codexCmd,
-	      codexInvoke,
-	      codexMode,
-	      codexModel,
-	      baseBranch,
-	      worktreeDir,
-	      projectFilter,
-	      dorMode,
-	      runner,
-	      runnerCommand,
-	    });
+  if (command === 'dispatch') {
+    const res = await dispatchOnce({
+      hubRoot,
+      mapping,
+      maxParallel,
+      dryRun,
+      tmuxPrefix,
+      agent,
+      agentCmd,
+      agentInvoke,
+      agentMode,
+      agentModel,
+      createPullRequest,
+      baseBranch,
+      worktreeDir,
+      projectFilter,
+      dorMode,
+      runner,
+      runnerCommand,
+    });
     if (res.changed) await maybeSync({ hubRoot, enabled: sync, dryRun });
     return;
   }
@@ -1293,6 +1507,7 @@ async function main() {
       dryRun,
       tmuxPrefix,
       projectFilter,
+      createPullRequest,
       worktreeDir,
       infraGraceHours,
     });
@@ -1303,7 +1518,28 @@ async function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-main().catch((err) => {
-  console.error(err?.stack || String(err));
-  process.exit(1);
-});
+const isMainModule = process.argv[1] && normalizeFsPath(process.argv[1]) === normalizeFsPath(fileURLToPath(import.meta.url));
+
+if (isMainModule) {
+  main().catch((err) => {
+    console.error(err?.stack || String(err));
+    process.exit(1);
+  });
+}
+
+export {
+  blockedResult,
+  buildWorkerPrompt,
+  deriveFinalStatusFromResult,
+  formatResultMarkdown,
+  hasLiveWorker,
+  getCommitGateIssues,
+  getPullRequestGateIssues,
+  normalizeWorkerResult,
+  parseCreatePullRequestRequirement,
+  reconcileOnce,
+  resolveCreatePullRequestRequirement,
+  resolveDispatchAgentInvoke,
+  resolveWorkerResultSchema,
+  validateWorkerResultShape,
+};

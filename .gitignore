@@ -63,3 +63,7 @@ public/status.json
 
 # Generated PRD board summary
 STATUS.md
+
+# Coding agents default helper files
+AGENT.md
+CLAUDE.md

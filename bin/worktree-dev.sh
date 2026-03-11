@@ -9,7 +9,7 @@ Usage:
 Examples:
   bin/worktree-dev.sh FEAT-0001
   bin/worktree-dev.sh .worktrees/FEAT-0001
-  bin/worktree-dev.sh /private/var/www/prd/.worktrees/FEAT-0001
+  bin/worktree-dev.sh /private/var/www/vibedeck/.worktrees/FEAT-0001
 
 What it does (inside the worktree):
   - symlink ./projects -> ../../projects

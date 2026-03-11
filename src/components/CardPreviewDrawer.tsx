@@ -68,7 +68,7 @@ export default function CardPreviewDrawer({
     void (async () => {
       try {
         const next = await fetchText(
-          `/__prd/api/log?project=${encodeURIComponent(card.project)}&cardId=${encodeURIComponent(card.id)}&t=${Date.now()}`,
+          `/__vbd/api/log?project=${encodeURIComponent(card.project)}&cardId=${encodeURIComponent(card.id)}&t=${Date.now()}`,
         );
         if (!cancelled) setLogText(next);
       } catch (error) {

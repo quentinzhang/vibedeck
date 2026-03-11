@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to Rushdeck.
+Thanks for your interest in contributing to Vibedeck.
 
 ## Development setup
 

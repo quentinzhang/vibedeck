@@ -205,7 +205,7 @@ async function main() {
   await ensureDir(path.dirname(outPath));
   await ensureDir(path.dirname(logPath));
   const exitPath = `${outPath}.exitcode`;
-  const defaultSessionId = sanitizeSessionId(`prd-${path.basename(outPath, path.extname(outPath))}`) || 'prd-run';
+  const defaultSessionId = sanitizeSessionId(`vbd-${path.basename(outPath, path.extname(outPath))}`) || 'vbd-run';
   const openclawSessionId = sanitizeSessionId(openclawSessionIdArg) || defaultSessionId;
 
   const codexCmdLine = buildCodexCommand({

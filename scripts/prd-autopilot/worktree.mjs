@@ -8,7 +8,7 @@ export function computeWorktreeNames({ project, cardId }) {
   return {
     projectKey,
     cardKey,
-    branchName: `prd/${projectKey}/${cardKey}`,
+    branchName: `vbd/${projectKey}/${cardKey}`,
     legacyBranchName: `prd/${String(cardId || '').trim()}`,
   };
 }
@@ -47,4 +47,3 @@ export function parseGitWorktreeListPorcelain(text) {
   flush();
   return entries;
 }
-

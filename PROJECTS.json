@@ -12,7 +12,7 @@
     "realtime-google": {
       "repoPath": "/var/www/realtime-google"
     },
-    "rushdeck": {
+    "vibedeck": {
       "repoPath": "/var/www/RushDeck"
     },
     "talkpal": {

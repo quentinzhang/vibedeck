@@ -193,7 +193,7 @@ export default function HubDashboard() {
     setSelectedLoading(true);
     void (async () => {
       try {
-        const text = await fetchText(`/__prd/api/card?relPath=${encodeURIComponent(selected.relPath)}&t=${Date.now()}`);
+        const text = await fetchText(`/__vbd/api/card?relPath=${encodeURIComponent(selected.relPath)}&t=${Date.now()}`);
         if (!cancelled) setSelectedText(text);
       } catch (error) {
         if (!cancelled) {
@@ -257,7 +257,7 @@ export default function HubDashboard() {
       setActionMessage(null);
       try {
         const res = await postJson<{ ok: boolean; relPath?: string; error?: string }>(
-          '/__prd/api/move',
+          '/__vbd/api/move',
           { relPath, toStatus },
         );
         if (!res.ok) {
@@ -279,7 +279,7 @@ export default function HubDashboard() {
   const openByRelPath = useCallback(async (relPath: string) => {
     setActionMessage(null);
     try {
-      const res = await postJson<{ ok: boolean; error?: string }>('/__prd/api/open', { relPath });
+      const res = await postJson<{ ok: boolean; error?: string }>('/__vbd/api/open', { relPath });
       if (!res.ok) {
         throw new Error(res.error || 'Open failed');
       }
@@ -394,14 +394,14 @@ export default function HubDashboard() {
       <div className="mx-auto max-w-7xl px-4 py-8">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Rushdeck</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Vibedeck</h1>
             <p className="text-sm text-zinc-400">
               {data?.generated_at ? (
                 <>
                   Last generated: <span className="text-zinc-200">{data.generated_at}</span>
                 </>
               ) : (
-                'Run `npm run prd:sync` to generate `/public/status.json`.'
+                'Run `npm run vbd:sync` to generate `/public/status.json`.'
               )}
             </p>
           </div>
@@ -504,7 +504,7 @@ export default function HubDashboard() {
             <div className="font-medium">Failed to load hub data</div>
             <div className="mt-1 font-mono text-xs opacity-90">{loadError}</div>
             <div className="mt-2 text-zinc-300">
-              Try: <span className="font-mono">npm run prd:sync</span> then refresh.
+              Try: <span className="font-mono">npm run vbd:sync</span> then refresh.
             </div>
           </div>
         )}
@@ -537,7 +537,7 @@ export default function HubDashboard() {
               <>
                 Missing repo mapping for <span className="font-mono text-xs">{selectedProjectSummary.name}</span>. Add it to{' '}
                 <span className="font-mono text-xs">PROJECTS.json</span> or run{' '}
-                <span className="font-mono text-xs">prd project map add --hub . --project {selectedProjectSummary.name} --repo-path &lt;absolute-path&gt; --non-interactive</span>
+                <span className="font-mono text-xs">vbd project map add --hub . --project {selectedProjectSummary.name} --repo-path &lt;absolute-path&gt; --non-interactive</span>
               </>
             )}
           </div>

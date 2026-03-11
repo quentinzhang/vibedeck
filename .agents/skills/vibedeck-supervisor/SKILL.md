@@ -1,9 +1,9 @@
 ---
-name: prd-supervisor
-description: "Use when operating as a scheduler-only Rushdeck supervisor for a local-first Kanban workflow: manage cards via `prd ...`, dispatch non-interactive `codex exec` workers in isolated `tmux` sessions + git worktrees, and reconcile card status by reading each worker's result JSON from the mapped project worktree."
+name: vibedeck-supervisor
+description: "Use when operating as a scheduler-only Vibedeck supervisor for a local-first Kanban workflow: manage cards via `vbd ...`, dispatch non-interactive `codex exec` workers in isolated processes or optional `tmux` sessions plus git worktrees, and reconcile card status by reading each worker's result JSON from the mapped project worktree."
 ---
 
-# Rushdeck Supervisor (Scheduler-Only)
+# Vibedeck Supervisor (Scheduler-Only)
 
 ## Role (Hard Constraints)
 

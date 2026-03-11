@@ -1,11 +1,12 @@
 {
-  "name": "rushdeck",
+  "name": "vibedeck",
   "private": false,
   "description": "Local-first Kanban hub with OpenClaw skills, visual board, CLI workflows, and coding-agent dispatch automation.",
   "version": "0.0.0",
   "license": "MIT",
   "type": "module",
   "bin": {
+    "vbd": "./bin/vbd.mjs",
     "prd": "./bin/prd.mjs"
   },
   "scripts": {
@@ -13,6 +14,19 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests",
+    "vbd:init": "node scripts/prd_cards.mjs init --hub .",
+    "vbd:project:new": "node scripts/prd_cards.mjs project:new --hub .",
+    "vbd:project:map:add": "node scripts/prd_cards.mjs project:map:add --hub .",
+    "vbd:project:map:list": "node scripts/prd_cards.mjs project:map:list --hub .",
+    "vbd:new": "node scripts/prd_cards.mjs new --hub .",
+    "vbd:move": "node scripts/prd_cards.mjs move --hub .",
+    "vbd:sync": "node scripts/prd-sync.mjs",
+    "vbd:roll:dispatch": "node scripts/prd-autopilot/prd_autopilot.mjs dispatch",
+    "vbd:roll:reconcile": "node scripts/prd-autopilot/prd_autopilot.mjs reconcile",
+    "vbd:roll:tick": "node scripts/prd-autopilot/prd_autopilot.mjs tick",
+    "vbd:autopilot:dispatch": "node scripts/prd-autopilot/prd_autopilot.mjs dispatch",
+    "vbd:autopilot:reconcile": "node scripts/prd-autopilot/prd_autopilot.mjs reconcile",
+    "vbd:autopilot:tick": "node scripts/prd-autopilot/prd_autopilot.mjs tick",
     "prd:init": "node scripts/prd_cards.mjs init --hub .",
     "prd:project:new": "node scripts/prd_cards.mjs project:new --hub .",
     "prd:project:map:add": "node scripts/prd_cards.mjs project:map:add --hub .",
@@ -29,13 +43,13 @@
   },
   "dependencies": {
     "lucide-react": "^0.555.0",
-    "react-dom": "^19.2.0",
-    "react": "^19.2.0"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "@types/react-dom": "^19.1.0",
     "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

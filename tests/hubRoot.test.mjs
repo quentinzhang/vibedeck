@@ -24,9 +24,21 @@ test('resolveHubRoot prefers explicit --hub', async () => {
 test('resolveHubRoot falls back to config file', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-root-'));
   const config = path.join(tmp, 'prd-hub.json');
-  await write(config, JSON.stringify({ hubRoot: '/var/www/prd' }));
-  const hub = await resolveHubRoot({ cwd: tmp, configFiles: [config], env: {} });
-  assert.equal(hub, path.resolve('/var/www/prd'));
+  await write(config, JSON.stringify({ hubRoot: '/var/www/vibedeck' }));
+  const hub = await resolveHubRoot({ cwd: tmp, configFiles: [config] });
+  assert.equal(hub, path.resolve('/var/www/vibedeck'));
+});
+
+test('resolveHubRoot ignores env-style overrides and uses config/default resolution only', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-root-'));
+  const config = path.join(tmp, 'prd-hub.json');
+  await write(config, JSON.stringify({ hubRoot: '/var/www/from-config' }));
+  const hub = await resolveHubRoot({
+    cwd: tmp,
+    configFiles: [config],
+    env: { VBD_HUB_ROOT: '/var/www/from-env' },
+  });
+  assert.equal(hub, path.resolve('/var/www/from-config'));
 });
 
 test('resolveHubRoot can infer hub from script location', async () => {
@@ -34,6 +46,6 @@ test('resolveHubRoot can infer hub from script location', async () => {
   await write(path.join(tmp, 'AGENT.md'), '- p: /var/www/p\n');
   await mkdirp(path.join(tmp, 'projects'));
   const fakeScriptPath = path.join(tmp, 'scripts', 'prd_cards.mjs');
-  const hub = await resolveHubRoot({ cwd: '/', env: {}, scriptPath: fakeScriptPath, configFiles: [] });
+  const hub = await resolveHubRoot({ cwd: '/', scriptPath: fakeScriptPath, configFiles: [] });
   assert.equal(hub, path.resolve(tmp));
 });

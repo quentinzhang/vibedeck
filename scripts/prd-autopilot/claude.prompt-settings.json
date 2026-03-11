@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PRD_AUTOPILOT_CLAUDE_STOP_HOOK\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -5,27 +5,46 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { parseAgentProjects, parseProjectRegistry } from './scripts/lib/agentMapping.mjs';
 
-async function resolvePrdHubRoot(repoRoot: string) {
-  const envRoot = String(process.env.PRD_HUB_ROOT || '').trim();
-  if (envRoot) return path.resolve(envRoot);
-
+async function readVbdConfig(configRoot: string) {
   try {
-    const raw = await fs.readFile(path.join(repoRoot, 'prd.config.json'), 'utf8');
+    const raw = await fs.readFile(path.join(configRoot, 'vbd.config.json'), 'utf8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const configured = String(parsed.hubRoot || parsed.hub_root || '').trim();
-    if (!configured) return repoRoot;
-    return path.isAbsolute(configured) ? path.resolve(configured) : path.resolve(repoRoot, configured);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
-    return repoRoot;
+    return {};
   }
 }
 
-export default defineConfig(async () => {
-  const allowRemote =
-    process.env.PRD_DASHBOARD_ALLOW_REMOTE === 'true' ||
-    process.env.PRD_DASHBOARD_ALLOW_REMOTE === '1';
+function readConfigString(config: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = String(config[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
 
-  const prdHubRoot = await resolvePrdHubRoot(path.resolve(__dirname, '.'));
+async function resolveDashboardConfig(repoRoot: string) {
+  const repoConfig = await readVbdConfig(repoRoot);
+  const hubRoot = (() => {
+    const configured = readConfigString(repoConfig, 'hubRoot', 'hub_root');
+    if (!configured) return repoRoot;
+    return path.isAbsolute(configured) ? path.resolve(configured) : path.resolve(repoRoot, configured);
+  })();
+
+  const hubConfig = hubRoot === repoRoot ? repoConfig : await readVbdConfig(hubRoot);
+  const editor =
+    readConfigString(hubConfig, 'editor', 'editorCommand', 'editor_command') ||
+    readConfigString(repoConfig, 'editor', 'editorCommand', 'editor_command');
+
+  const allowRemote =
+    readConfigString(hubConfig, 'dashboardAllowRemote', 'dashboard_allow_remote') === 'true' ||
+    readConfigString(repoConfig, 'dashboardAllowRemote', 'dashboard_allow_remote') === 'true';
+
+  return { hubRoot, editor, allowRemote };
+}
+
+export default defineConfig(async () => {
+  const { hubRoot: prdHubRoot, editor: configuredEditor, allowRemote } = await resolveDashboardConfig(path.resolve(__dirname, '.'));
 
   const internalPrdApi = () => {
     const repoRoot = prdHubRoot;
@@ -145,7 +164,7 @@ export default defineConfig(async () => {
     }
 
     function tryOpenWithEditors(absPath: string, line?: number, column?: number) {
-      const preferred = String(process.env.PRD_DASHBOARD_EDITOR || '').trim();
+      const preferred = String(configuredEditor || '').trim();
       const candidates = [
         preferred || null,
         'code-insiders',
@@ -182,7 +201,7 @@ export default defineConfig(async () => {
     }
 
     function register(server: any) {
-      server.middlewares.use('/__prd/api/open', async (req: any, res: any) => {
+      server.middlewares.use('/__vbd/api/open', async (req: any, res: any) => {
         if (!isLocalRequest(req)) {
           sendJson(res, 403, { ok: false, error: 'Forbidden' });
           return;
@@ -210,7 +229,7 @@ export default defineConfig(async () => {
         }
       });
 
-      server.middlewares.use('/__prd/api/move', async (req: any, res: any) => {
+      server.middlewares.use('/__vbd/api/move', async (req: any, res: any) => {
         if (!isLocalRequest(req)) {
           sendJson(res, 403, { ok: false, error: 'Forbidden' });
           return;
@@ -248,7 +267,7 @@ export default defineConfig(async () => {
         }
       });
 
-      server.middlewares.use('/__prd/api/card', async (req: any, res: any) => {
+      server.middlewares.use('/__vbd/api/card', async (req: any, res: any) => {
         if (!isLocalRequest(req)) {
           res.statusCode = 403;
           res.end('Forbidden');
@@ -278,7 +297,7 @@ export default defineConfig(async () => {
         }
       });
 
-      server.middlewares.use('/__prd/api/log', async (req: any, res: any) => {
+      server.middlewares.use('/__vbd/api/log', async (req: any, res: any) => {
         if (!isLocalRequest(req)) {
           res.statusCode = 403;
           res.end('Forbidden');
@@ -365,7 +384,7 @@ export default defineConfig(async () => {
     }
 
     return {
-      name: 'internal-prd-api',
+      name: 'internal-vbd-api',
       configureServer(server: any) {
         register(server);
       },
@@ -384,6 +403,7 @@ export default defineConfig(async () => {
       rollupOptions: {
         input: {
           main: path.resolve(__dirname, 'index.html'),
+          vbd: path.resolve(__dirname, 'vbd.html'),
           prd: path.resolve(__dirname, 'prd.html'),
         },
       },

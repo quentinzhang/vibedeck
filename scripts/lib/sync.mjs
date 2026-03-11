@@ -226,7 +226,7 @@ export function renderStatusMarkdown(status) {
   const projects = Array.isArray(status?.projects) ? status.projects : [];
 
   const lines = [];
-  lines.push('# Rushdeck Status Board', '', `Last updated: ${today}`, '');
+  lines.push('# Vibedeck Status Board', '', `Last updated: ${today}`, '');
   lines.push('## Projects', '');
 
   if (projects.length === 0) {

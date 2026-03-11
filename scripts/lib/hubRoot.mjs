@@ -91,18 +91,16 @@ function hubFromConfigValue(value) {
 export async function resolveHubRoot({
   hubArg,
   cwd = process.cwd(),
-  env = process.env,
   configFiles = [],
   scriptPath,
 } = {}) {
   if (hubArg) return path.resolve(String(hubArg));
 
-  const envRoot = String(env?.PRD_HUB_ROOT || '').trim();
-  if (envRoot) return path.resolve(expandHome(envRoot));
-
   const configCandidates = configFiles.length
     ? configFiles
     : [
+        path.join(os.homedir(), '.codex', 'vbd-hub.json'),
+        path.join(os.homedir(), '.vbd-hub.json'),
         path.join(os.homedir(), '.codex', 'prd-hub.json'),
         path.join(os.homedir(), '.prd-hub.json'),
       ];
@@ -118,6 +116,7 @@ export async function resolveHubRoot({
   const fromCwd = await findHubUpFromCwd(cwd);
   if (fromCwd) return fromCwd;
 
+  const preferred = path.join(os.homedir(), 'vibedeck');
+  if (await looksLikeHubRoot(preferred)) return path.resolve(preferred);
   return path.resolve(path.join(os.homedir(), 'prd'));
 }
-

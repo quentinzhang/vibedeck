@@ -53,6 +53,7 @@ test('prd_cards.mjs new requires --project in non-interactive mode', async () =>
 
 test('prd_cards.mjs project:new creates project and mapping (non-interactive)', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-cli-'));
+  const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-project-new-repo-'));
   await write(path.join(tmp, 'AGENT.md'), '# guide\n');
   await write(path.join(tmp, 'PROJECTS.json'), '{"projects":{}}\n');
   await mkdirp(path.join(tmp, 'projects'));
@@ -73,7 +74,7 @@ test('prd_cards.mjs project:new creates project and mapping (non-interactive)', 
       '--project',
       'p2',
       '--repo_path',
-      '/var/www/p2',
+      repoPath,
       '--non_interactive',
     ],
     { encoding: 'utf8' },
@@ -81,7 +82,7 @@ test('prd_cards.mjs project:new creates project and mapping (non-interactive)', 
 
   assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
   const registry = JSON.parse(await fs.readFile(path.join(tmp, 'PROJECTS.json'), 'utf8'));
-  assert.equal(registry.projects.p2.repoPath, '/var/www/p2');
+  assert.equal(registry.projects.p2.repoPath, repoPath);
   const archivedDir = path.join(tmp, 'projects', 'p2', 'archived');
   const stat = await fs.stat(archivedDir);
   assert.equal(stat.isDirectory(), true);
@@ -89,6 +90,7 @@ test('prd_cards.mjs project:new creates project and mapping (non-interactive)', 
 
 test('prd_cards.mjs project:new appends mapping without dropping existing entries', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-cli-'));
+  const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-project-append-repo-'));
   await write(path.join(tmp, 'AGENT.md'), '# guide\n');
   await write(path.join(tmp, 'PROJECTS.json'), '{"projects":{"p1":{"repoPath":"/var/www/p1"}}}\n');
   await mkdirp(path.join(tmp, 'projects'));
@@ -104,7 +106,7 @@ test('prd_cards.mjs project:new appends mapping without dropping existing entrie
       '--project',
       'p2',
       '--repo_path',
-      '/var/www/p2',
+      repoPath,
       '--non_interactive',
     ],
     { encoding: 'utf8' },
@@ -113,11 +115,12 @@ test('prd_cards.mjs project:new appends mapping without dropping existing entrie
   assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
   const registry = JSON.parse(await fs.readFile(path.join(tmp, 'PROJECTS.json'), 'utf8'));
   assert.equal(registry.projects.p1.repoPath, '/var/www/p1');
-  assert.equal(registry.projects.p2.repoPath, '/var/www/p2');
+  assert.equal(registry.projects.p2.repoPath, repoPath);
 });
 
 test('prd_cards.mjs project:map:add writes PROJECTS.json', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-map-'));
+  const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-project-map-repo-'));
   await write(path.join(tmp, 'AGENT.md'), '# guide\n');
   await write(path.join(tmp, 'PROJECTS.json'), '{"projects":{}}\n');
   await mkdirp(path.join(tmp, 'projects'));
@@ -125,13 +128,13 @@ test('prd_cards.mjs project:map:add writes PROJECTS.json', async () => {
   const script = path.join(process.cwd(), 'scripts', 'prd_cards.mjs');
   const res = spawnSync(
     process.execPath,
-    [script, 'project:map:add', '--hub', tmp, '--project', 'p9', '--repo_path', '/var/www/p9', '--non_interactive'],
+    [script, 'project:map:add', '--hub', tmp, '--project', 'p9', '--repo_path', repoPath, '--non_interactive'],
     { encoding: 'utf8' },
   );
 
   assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
   const registry = JSON.parse(await fs.readFile(path.join(tmp, 'PROJECTS.json'), 'utf8'));
-  assert.equal(registry.projects.p9.repoPath, '/var/www/p9');
+  assert.equal(registry.projects.p9.repoPath, repoPath);
 });
 
 test('prd_cards.mjs project:map:migrate imports legacy AGENT mappings into PROJECTS.json', async () => {
@@ -182,7 +185,7 @@ test('prd_cards.mjs new prompts component with numeric options and allows custom
         'P2',
         '--dry_run',
       ],
-      { encoding: 'utf8', input: '2\n', env: { ...process.env, CI: '' } },
+      { encoding: 'utf8', input: '\n2\n', env: { ...process.env, CI: '' } },
     );
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
     assert.match(res.stdout || '', /component:\s*\"api\"/);
@@ -206,11 +209,43 @@ test('prd_cards.mjs new prompts component with numeric options and allows custom
         'P2',
         '--dry_run',
       ],
-      { encoding: 'utf8', input: 'ml\n', env: { ...process.env, CI: '' } },
+      { encoding: 'utf8', input: '\nml\n', env: { ...process.env, CI: '' } },
     );
     assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
     assert.match(res.stdout || '', /component:\s*\"ml\"/);
   }
+});
+
+test('prd_cards.mjs new accepts optional summary input and writes it into the card body', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'prd-hub-summary-'));
+  await write(path.join(tmp, 'AGENT.md'), '# guide\n');
+  await write(path.join(tmp, 'PROJECTS.json'), '{"projects":{"p1":{"repoPath":"/var/www/p1"}}}\n');
+
+  const script = path.join(process.cwd(), 'scripts', 'prd_cards.mjs');
+
+  const res = spawnSync(
+    process.execPath,
+    [
+      script,
+      'new',
+      '--hub',
+      tmp,
+      '--project',
+      'p1',
+      '--template',
+      'lite',
+      '--title',
+      'Foo',
+      '--priority',
+      'P2',
+      '--dry_run',
+    ],
+    { encoding: 'utf8', input: '1\nShort summary\n1\n', env: { ...process.env, CI: '' } },
+  );
+
+  assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));
+  assert.match(res.stdout || '', /## Summary\n\nShort summary\n\n## Acceptance Criteria/);
+  assert.match(res.stdout || '', /component:\s*\"ui\"/);
 });
 
 test('prd_cards.mjs new prompts type and priority for lite template', async () => {
@@ -237,7 +272,7 @@ test('prd_cards.mjs new prompts type and priority for lite template', async () =
       'ui',
       '--dry_run',
     ],
-    { encoding: 'utf8', input: '2\n1\n', env: { ...process.env, CI: '' } },
+    { encoding: 'utf8', input: '2\n\n1\n', env: { ...process.env, CI: '' } },
   );
 
   assert.equal(res.status, 0, (res.stderr || '') + (res.stdout || ''));

@@ -70,6 +70,20 @@ function normalizeTemplateName(raw) {
   return original;
 }
 
+const DEFAULT_COMPONENT_CHOICES = [
+  'ui',
+  'api',
+  'frontend',
+  'backend',
+  'mobile',
+  'infra',
+  'data',
+  'ai',
+  'agent',
+  'docs',
+  'ops',
+];
+
 function splitValueAndComment(rawValue) {
   const idx = String(rawValue || '').indexOf(' #');
   if (idx === -1) return { value: String(rawValue || '').trim(), comment: '' };
@@ -171,6 +185,51 @@ function applyOverridesToTemplate(templateText, overrides) {
   return `---\n${updated.join('\n')}\n---\n\n${rest.trimStart()}`;
 }
 
+function injectSectionText(markdownText, heading, bodyText) {
+  const normalizedBody = String(bodyText || '').trim();
+  if (!normalizedBody) return String(markdownText || '');
+
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(^## ${escapedHeading}\\n\\n)`, 'm');
+  if (pattern.test(markdownText)) {
+    return String(markdownText).replace(pattern, `$1${normalizedBody}\n\n`);
+  }
+
+  return String(markdownText || '');
+}
+
+function applySummaryToContent(content, summary) {
+  const normalizedSummary = String(summary || '').trim();
+  if (!normalizedSummary) return content;
+
+  const withSummarySection = injectSectionText(content, 'Summary', normalizedSummary);
+  if (withSummarySection !== content) return withSummarySection;
+
+  const withBackgroundSection = injectSectionText(content, 'Background / Problem Statement', normalizedSummary);
+  if (withBackgroundSection !== content) return withBackgroundSection;
+
+  const match = String(content || '').match(/^(---\s*\n[\s\S]*?\n---\s*\n)([\s\S]*)$/);
+  if (!match) return content;
+  return `${match[1]}\n## Summary\n\n${normalizedSummary}\n\n${match[2].trimStart()}`;
+}
+
+function buildComponentChoices(discovered = []) {
+  const merged = [];
+  const seen = new Set();
+
+  for (const value of [...DEFAULT_COMPONENT_CHOICES, ...discovered]) {
+    const component = String(value || '').trim();
+    if (!component) continue;
+    if (normalizeType(component)) continue;
+    const normalizedKey = component.toLowerCase();
+    if (seen.has(normalizedKey)) continue;
+    seen.add(normalizedKey);
+    merged.push(component);
+  }
+
+  return merged;
+}
+
 async function fileExists(filePath) {
   try {
     const stat = await fs.stat(filePath);
@@ -187,6 +246,18 @@ async function dirExists(dirPath) {
   } catch {
     return false;
   }
+}
+
+async function validateExistingRepoPath(repoPath, { flagName = '--repo_path' } = {}) {
+  const raw = String(repoPath || '').trim();
+  if (!looksLikeAbsolutePath(raw)) throw new Error(`Invalid ${flagName} (must be absolute)`);
+
+  const resolved = path.resolve(expandHome(raw));
+  if (!(await dirExists(resolved))) {
+    throw new Error(`Invalid ${flagName} (directory does not exist): ${resolved}`);
+  }
+
+  return resolved;
 }
 
 async function ensureDir(dirPath) {
@@ -286,7 +357,7 @@ async function resolveProjectName({ hubRoot, repoRoot, projectName }) {
       `No project mapping found for repo: ${repoResolved}`,
       `Add a mapping in: ${path.join(prdHub, 'PROJECTS.json')}`,
       ``,
-      `prd project map add --hub ${prdHub} --project ${suggestedName} --repo-path ${repoResolved}`,
+      `vbd project map add --hub ${prdHub} --project ${suggestedName} --repo-path ${repoResolved}`,
     ].join('\n'),
   );
 }
@@ -649,13 +720,13 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
   await copyOrWrite({
     srcPaths: [path.join(assetsRoot, 'AGENT.md'), path.join(legacyAssetsRoot, 'AGENT.md'), path.join(repoRoot, 'AGENT.md')],
     destPath: path.join(hub, 'AGENT.md'),
-    fallbackContent: '# Rushdeck Agent Guide\n\nProject mappings live in PROJECTS.json.\n',
+    fallbackContent: '# Vibedeck Agent Guide\n\nProject mappings live in PROJECTS.json.\n',
     force,
   });
   await copyOrWrite({
     srcPaths: [path.join(assetsRoot, 'README.md'), path.join(legacyAssetsRoot, 'README.md'), path.join(repoRoot, 'README.md')],
     destPath: path.join(hub, 'README.md'),
-    fallbackContent: '# Rushdeck\n',
+    fallbackContent: '# Vibedeck\n',
     force,
   });
   await copyOrWrite({
@@ -665,7 +736,7 @@ async function ensureHubLayout({ hubRoot, force = false } = {}) {
       path.join(repoRoot, 'CODEX_DAILY.md'),
     ],
     destPath: path.join(hub, 'CODEX_DAILY.md'),
-    fallbackContent: '# Codex daily routine\n\n- Run `npm run prd:sync`\n- Pick a card\n- Work it\n',
+    fallbackContent: '# Codex daily routine\n\n- Run `npm run vbd:sync`\n- Pick a card\n- Work it\n',
     force,
   });
   await copyOrWrite({
@@ -797,10 +868,10 @@ async function cmdProjectNew(args) {
     }
 
     if (repoPath) {
-      if (!looksLikeAbsolutePath(repoPath)) throw new Error('Invalid --repo_path (must be absolute)');
-      projects.set(projectName, path.resolve(expandHome(repoPath)));
+      const resolvedRepoPath = await validateExistingRepoPath(repoPath, { flagName: '--repo_path' });
+      projects.set(projectName, resolvedRepoPath);
       await writeProjectRegistry(hubRoot, projects);
-      console.log(`Added mapping: ${projectName} -> ${repoPath}`);
+      console.log(`Added mapping: ${projectName} -> ${resolvedRepoPath}`);
     } else {
       projects.set(projectName, ""); // Save the project even without a repo mapping
       await writeProjectRegistry(hubRoot, projects);
@@ -852,12 +923,12 @@ async function cmdProjectMapAdd(args) {
   if (!projectName) throw new Error('Missing/invalid --project');
 
   const repoPath = String(args.repo_path || '').trim();
-  if (!looksLikeAbsolutePath(repoPath)) throw new Error('Invalid --repo_path (must be absolute)');
+  const resolvedRepoPath = await validateExistingRepoPath(repoPath, { flagName: '--repo_path' });
 
   const mapping = await readProjectMapping(hubRoot);
-  mapping.set(projectName, path.resolve(expandHome(repoPath)));
+  mapping.set(projectName, resolvedRepoPath);
   await writeProjectRegistry(hubRoot, mapping);
-  console.log(`Added mapping: ${projectName} -> ${repoPath}`);
+  console.log(`Added mapping: ${projectName} -> ${resolvedRepoPath}`);
 }
 
 async function cmdProjectMapMigrate(args) {
@@ -978,18 +1049,16 @@ async function cmdNew(args) {
     }
     if (!title) throw new Error('Missing --title.');
 
+    let summary = String(args.summary || '').trim();
+    if (!summary && !isNonInteractive(args)) {
+      summary = String(await promptText({ rl: getRl(), question: 'Summary (optional)' })).trim();
+    }
+
     let component = String(args.component || '').trim();
     if (!component) {
       if (isNonInteractive(args)) throw new Error('Missing --component.');
       const discovered = await listProjectComponents({ hubRoot, projectName });
-      const merged = [];
-      const seen = new Set();
-      for (const value of ['ui', 'api', ...discovered]) {
-        const c = String(value || '').trim();
-        if (!c || seen.has(c)) continue;
-        seen.add(c);
-        merged.push(c);
-      }
+      const merged = buildComponentChoices(discovered);
       component = String(
         await promptChoiceOrText({
           rl: getRl(),
@@ -1060,7 +1129,7 @@ async function cmdNew(args) {
 
     const today = getToday();
     const templateText = await pickTemplateByName({ hubRoot, templateName });
-    const content = applyOverridesToTemplate(templateText, {
+    const content = applySummaryToContent(applyOverridesToTemplate(templateText, {
       id,
       title,
       type,
@@ -1076,7 +1145,7 @@ async function cmdNew(args) {
       spec,
       labels,
       estimate,
-    });
+    }), summary);
 
     if (args.dry_run === true) {
       console.log(`[DRY RUN] Would create: ${outPath}`);
@@ -1244,7 +1313,7 @@ async function cmdMove(args) {
 }
 
 function printHelp() {
-  console.log(`Rushdeck helper (multi-project)
+  console.log(`Vibedeck helper (multi-project)
 
 Usage:
   node scripts/prd_cards.mjs init [--hub <path>] [--project <name>] [--force]
@@ -1260,7 +1329,7 @@ Usage:
   node scripts/prd_cards.mjs validate [--hub <path>]
 
 Common:
-  --hub <path>        Rushdeck root (default: auto-detected; override with $PRD_HUB_ROOT or ~/.codex/prd-hub.json)
+  --hub <path>        Vibedeck root (default: auto-detected; or read from hub config files)
   --help
   --non_interactive   fail instead of prompting (also enabled when CI=1/true)
 
@@ -1268,6 +1337,7 @@ new options:
   --project <name>    required; when omitted, prompts to select from <hub>/projects/
   --repo <path>       optional; if set and mapped in <hub>/PROJECTS.json, used as default selection
   --template full|lite|<path>  card body template (default: lite)
+  --summary "text"    optional short summary written into the card body
   --status drafts|pending|in-progress|in-review|blocked|done|archived
   --priority P0|P1|P2|P3
   --severity S0|S1|S2|S3 (bug only)

@@ -4,6 +4,8 @@
 
 VibeDeck is a local-first Kanban hub built for personal developer workflows. It combines Markdown requirement cards, a visual board, terminal-first operations, OpenClaw-powered natural-language card creation, and automated dispatch to coding agents so you can run a lightweight Vibe Coding workflow across one or more projects.
 
+![VibeDeck Overview](https://static.evalsone.com/cdn/5d18b61f-b07f-47f0-8e51-f21b6e1f4b0c.png)
+
 ## Why I Built VibeDeck
 
 As an independent developer, I need to manage multiple projects at the same time. I want to capture and raise requirements whenever they appear, without being blocked by location, device, or time. I also need those requirements to become clear enough that an AI Assistant can reliably drive a Coding Agent to begin work, while the overall project management process stays simple, clear, and orderly.

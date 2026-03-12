@@ -1,12 +1,12 @@
 # VibeDeck
 
-![VibeDeck Overview](https://static.evalsone.com/uploads/image_5425053b-8e63-4230-b120-a0ddc78ce4d0.png)
+![VibeDeck Overview](https://static.evalsone.com/uploads/image_e60addef-2caa-4180-ad11-5e338561502f.png?width=600&fit=cover&format=webp)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 VibeDeck 是一个面向个人开发者工作流的本地优先 Kanban 中枢。它将 Markdown 需求卡片、可视化看板、终端优先操作、基于 OpenClaw 的自然语言建卡能力，以及面向 Coding Agent 的自动分发组合在一起，帮助你在一个或多个项目中运行轻量化的 Vibe Coding 自动化流程。
 
-![VibeDeck Overview](https://static.evalsone.com/uploads/image_e60addef-2caa-4180-ad11-5e338561502f.png?width=600&fit=cover&format=webp)
+![VibeDeck Overview](https://static.evalsone.com/cdn/5d18b61f-b07f-47f0-8e51-f21b6e1f4b0c.png)
 
 ## 为什么开发 VibeDeck
 
